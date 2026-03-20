@@ -4,7 +4,7 @@ from datetime import datetime
 import json
 
 class AfriSupplyAPITester:
-    def __init__(self, base_url="https://supply-connect-40.preview.emergentagent.com"):
+    def __init__(self, base_url="https://afrisupply-dev.preview.emergentagent.com"):
         self.base_url = base_url
         self.token = None
         self.tests_run = 0
