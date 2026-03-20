@@ -16,17 +16,19 @@ import { formatDate } from '../lib/utils';
 
 const NotificationsPage = () => {
   const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, loading: authLoading } = useAuth();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (authLoading) return; // Wait for auth to initialize
+    
     if (!isAuthenticated) {
       navigate('/login');
       return;
     }
     fetchNotifications();
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, authLoading, navigate]);
 
   const fetchNotifications = async () => {
     try {

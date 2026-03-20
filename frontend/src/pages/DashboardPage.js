@@ -21,7 +21,7 @@ import { formatPrice, formatDate, getStatusColor, getStatusLabel } from '../lib/
 
 const DashboardPage = () => {
   const navigate = useNavigate();
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, loading: authLoading } = useAuth();
   const [orders, setOrders] = useState([]);
   const [products, setProducts] = useState([]);
   const [favorites, setFavorites] = useState([]);
@@ -29,6 +29,8 @@ const DashboardPage = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (authLoading) return; // Wait for auth to initialize
+    
     if (!isAuthenticated) {
       navigate('/login');
       return;
@@ -58,7 +60,7 @@ const DashboardPage = () => {
     };
 
     fetchData();
-  }, [isAuthenticated, user, navigate]);
+  }, [isAuthenticated, authLoading, user, navigate]);
 
   const isSupplier = user?.user_type === 'supplier';
 

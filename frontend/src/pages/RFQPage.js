@@ -32,7 +32,7 @@ import { toast } from 'sonner';
 const RFQPage = () => {
   const navigate = useNavigate();
   const { rfqId } = useParams();
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, loading: authLoading } = useAuth();
   const [rfqs, setRfqs] = useState([]);
   const [selectedRfq, setSelectedRfq] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -44,12 +44,14 @@ const RFQPage = () => {
   });
 
   useEffect(() => {
+    if (authLoading) return; // Wait for auth to initialize
+    
     if (!isAuthenticated) {
       navigate('/login');
       return;
     }
     fetchRFQs();
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, authLoading, navigate]);
 
   useEffect(() => {
     if (rfqId && rfqs.length > 0) {

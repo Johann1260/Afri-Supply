@@ -16,7 +16,7 @@ import { toast } from 'sonner';
 const MessagesPage = () => {
   const navigate = useNavigate();
   const { partnerId } = useParams();
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, loading: authLoading } = useAuth();
   const [conversations, setConversations] = useState([]);
   const [messages, setMessages] = useState([]);
   const [selectedPartner, setSelectedPartner] = useState(null);
@@ -26,12 +26,14 @@ const MessagesPage = () => {
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
+    if (authLoading) return; // Wait for auth to initialize
+    
     if (!isAuthenticated) {
       navigate('/login');
       return;
     }
     fetchConversations();
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, authLoading, navigate]);
 
   useEffect(() => {
     if (partnerId) {
