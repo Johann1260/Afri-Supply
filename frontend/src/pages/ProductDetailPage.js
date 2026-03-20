@@ -11,13 +11,25 @@ import {
   Truck,
   Shield,
   ChatCircle,
-  CaretLeft
+  CaretLeft,
+  FileText
 } from '@phosphor-icons/react';
 import { Layout } from '../components/layout';
 import { ProductGrid } from '../components/products';
 import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { Textarea } from '../components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { productsAPI, reviewsAPI, favoritesAPI } from '../lib/api';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '../components/ui/dialog';
+import { productsAPI, reviewsAPI, favoritesAPI, rfqAPI, messagesAPI } from '../lib/api';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { formatPrice, formatDate, getStatusColor } from '../lib/utils';
@@ -36,6 +48,17 @@ const ProductDetailPage = () => {
   const [quantity, setQuantity] = useState(1);
   const [selectedImage, setSelectedImage] = useState(0);
   const [isFavorite, setIsFavorite] = useState(false);
+  const [rfqDialogOpen, setRfqDialogOpen] = useState(false);
+  const [contactDialogOpen, setContactDialogOpen] = useState(false);
+  const [rfqData, setRfqData] = useState({
+    quantity: '',
+    target_price: '',
+    delivery_location: '',
+    delivery_deadline: '',
+    specifications: '',
+    notes: ''
+  });
+  const [contactMessage, setContactMessage] = useState('');
 
   useEffect(() => {
     const fetchProduct = async () => {
@@ -103,6 +126,63 @@ const ProductDetailPage = () => {
       }
     } catch (error) {
       toast.error('Erreur');
+    }
+  };
+
+  const handleSubmitRFQ = async () => {
+    if (!isAuthenticated) {
+      toast.error('Veuillez vous connecter');
+      navigate('/login');
+      return;
+    }
+
+    if (!rfqData.quantity || !rfqData.delivery_location) {
+      toast.error('Veuillez remplir les champs obligatoires');
+      return;
+    }
+
+    try {
+      await rfqAPI.create({
+        product_id: product.id,
+        supplier_id: product.supplier_id,
+        quantity: parseInt(rfqData.quantity),
+        target_price: rfqData.target_price ? parseFloat(rfqData.target_price) : null,
+        delivery_location: rfqData.delivery_location,
+        delivery_deadline: rfqData.delivery_deadline || null,
+        specifications: rfqData.specifications || null,
+        notes: rfqData.notes || null
+      });
+      toast.success('Demande de devis envoyée');
+      setRfqDialogOpen(false);
+      setRfqData({ quantity: '', target_price: '', delivery_location: '', delivery_deadline: '', specifications: '', notes: '' });
+    } catch (error) {
+      toast.error('Erreur lors de l\'envoi de la demande');
+    }
+  };
+
+  const handleSendMessage = async () => {
+    if (!isAuthenticated) {
+      toast.error('Veuillez vous connecter');
+      navigate('/login');
+      return;
+    }
+
+    if (!contactMessage.trim()) {
+      toast.error('Veuillez entrer un message');
+      return;
+    }
+
+    try {
+      await messagesAPI.send({
+        receiver_id: product.supplier_id,
+        content: contactMessage.trim(),
+        product_id: product.id
+      });
+      toast.success('Message envoyé');
+      setContactDialogOpen(false);
+      setContactMessage('');
+    } catch (error) {
+      toast.error('Erreur lors de l\'envoi');
     }
   };
 
@@ -217,10 +297,38 @@ const ProductDetailPage = () => {
                 <p className="text-sm text-slate-500">Fournisseur</p>
                 <p className="font-semibold">{product.supplier_company || product.supplier_name}</p>
               </div>
-              <Button variant="outline" size="sm" className="ml-auto" data-testid="contact-supplier">
-                <ChatCircle className="w-4 h-4 mr-2" />
-                Contacter
-              </Button>
+              <Dialog open={contactDialogOpen} onOpenChange={setContactDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm" className="ml-auto" data-testid="contact-supplier">
+                    <ChatCircle className="w-4 h-4 mr-2" />
+                    Contacter
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Contacter le fournisseur</DialogTitle>
+                    <DialogDescription>
+                      Envoyez un message à {product.supplier_company || product.supplier_name}
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4 pt-4">
+                    <Textarea
+                      value={contactMessage}
+                      onChange={(e) => setContactMessage(e.target.value)}
+                      placeholder="Bonjour, je suis intéressé par votre produit..."
+                      rows={4}
+                      data-testid="contact-message-input"
+                    />
+                    <Button 
+                      className="w-full bg-accent hover:bg-accent-hover"
+                      onClick={handleSendMessage}
+                      data-testid="send-contact-message"
+                    >
+                      Envoyer le message
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
             </div>
 
             {/* Price */}
@@ -267,7 +375,7 @@ const ProductDetailPage = () => {
             </div>
 
             {/* Actions */}
-            <div className="flex gap-3 mb-8">
+            <div className="flex flex-wrap gap-3 mb-4">
               <Button
                 size="lg"
                 className="flex-1 bg-accent hover:bg-accent-hover"
@@ -288,6 +396,94 @@ const ProductDetailPage = () => {
                 <Heart className="w-5 h-5" weight={isFavorite ? 'fill' : 'regular'} />
               </Button>
             </div>
+
+            {/* RFQ Button */}
+            <Dialog open={rfqDialogOpen} onOpenChange={setRfqDialogOpen}>
+              <DialogTrigger asChild>
+                <Button
+                  size="lg"
+                  variant="outline"
+                  className="w-full mb-8 border-primary text-primary hover:bg-primary/5"
+                  data-testid="request-quote-btn"
+                >
+                  <FileText className="w-5 h-5 mr-2" />
+                  Demander un devis personnalisé
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>Demande de Devis (RFQ)</DialogTitle>
+                  <DialogDescription>
+                    Demandez un devis personnalisé pour {product.name}
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 pt-4 max-h-[60vh] overflow-y-auto">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label>Quantité souhaitée *</Label>
+                      <Input
+                        type="number"
+                        value={rfqData.quantity}
+                        onChange={(e) => setRfqData({ ...rfqData, quantity: e.target.value })}
+                        placeholder={`Min. ${product.min_order_quantity}`}
+                        data-testid="rfq-quantity"
+                      />
+                    </div>
+                    <div>
+                      <Label>Prix cible (XAF)</Label>
+                      <Input
+                        type="number"
+                        value={rfqData.target_price}
+                        onChange={(e) => setRfqData({ ...rfqData, target_price: e.target.value })}
+                        placeholder="Optionnel"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <Label>Lieu de livraison *</Label>
+                    <Input
+                      value={rfqData.delivery_location}
+                      onChange={(e) => setRfqData({ ...rfqData, delivery_location: e.target.value })}
+                      placeholder="Ville, Pays"
+                      data-testid="rfq-location"
+                    />
+                  </div>
+                  <div>
+                    <Label>Date limite de livraison</Label>
+                    <Input
+                      type="date"
+                      value={rfqData.delivery_deadline}
+                      onChange={(e) => setRfqData({ ...rfqData, delivery_deadline: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <Label>Spécifications particulières</Label>
+                    <Textarea
+                      value={rfqData.specifications}
+                      onChange={(e) => setRfqData({ ...rfqData, specifications: e.target.value })}
+                      placeholder="Dimensions, couleur, certifications..."
+                      rows={2}
+                    />
+                  </div>
+                  <div>
+                    <Label>Notes supplémentaires</Label>
+                    <Textarea
+                      value={rfqData.notes}
+                      onChange={(e) => setRfqData({ ...rfqData, notes: e.target.value })}
+                      placeholder="Conditions de paiement, remarques..."
+                      rows={2}
+                    />
+                  </div>
+                  <Button 
+                    className="w-full bg-accent hover:bg-accent-hover"
+                    onClick={handleSubmitRFQ}
+                    data-testid="submit-rfq"
+                  >
+                    Envoyer la demande de devis
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
 
             {/* Benefits */}
             <div className="grid grid-cols-3 gap-4 pt-6 border-t border-slate-200">

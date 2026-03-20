@@ -7,7 +7,8 @@ import {
   ShieldCheck,
   CheckCircle,
   XCircle,
-  Spinner
+  Spinner,
+  DeviceMobile
 } from '@phosphor-icons/react';
 import { Layout } from '../components/layout';
 import { Button } from '../components/ui/button';
@@ -21,9 +22,16 @@ import {
   SelectTrigger, 
   SelectValue 
 } from '../components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '../components/ui/dialog';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
-import { ordersAPI, paymentAPI } from '../lib/api';
+import { ordersAPI, paymentAPI, mobileMoneyAPI } from '../lib/api';
 import { formatPrice } from '../lib/utils';
 import { toast } from 'sonner';
 
@@ -34,6 +42,12 @@ const CheckoutPage = () => {
   const { user, isAuthenticated } = useAuth();
   const [loading, setLoading] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState(null);
+  const [mobileMoneyDialogOpen, setMobileMoneyDialogOpen] = useState(false);
+  const [mobileMoneyData, setMobileMoneyData] = useState({
+    phone_number: user?.phone || '',
+    network: 'MTN'
+  });
+  const [mobileMoneyTransaction, setMobileMoneyTransaction] = useState(null);
   
   const [formData, setFormData] = useState({
     shipping_address: '',
@@ -105,14 +119,54 @@ const CheckoutPage = () => {
       // Create orders first
       await ordersAPI.create(formData);
 
-      // Create Stripe checkout session
-      const originUrl = window.location.origin;
-      const res = await paymentAPI.createCheckoutSession(originUrl);
-      
-      // Redirect to Stripe
-      window.location.href = res.data.url;
+      if (formData.payment_method === 'mobile_money') {
+        // Open Mobile Money dialog
+        setMobileMoneyDialogOpen(true);
+        setLoading(false);
+      } else {
+        // Create Stripe checkout session
+        const originUrl = window.location.origin;
+        const res = await paymentAPI.createCheckoutSession(originUrl);
+        
+        // Redirect to Stripe
+        window.location.href = res.data.url;
+      }
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Erreur lors de la commande');
+      setLoading(false);
+    }
+  };
+
+  const handleMobileMoneyPayment = async () => {
+    if (!mobileMoneyData.phone_number) {
+      toast.error('Veuillez entrer votre numéro de téléphone');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await mobileMoneyAPI.createPayment(mobileMoneyData);
+      setMobileMoneyTransaction(res.data);
+      toast.success('Demande de paiement envoyée');
+    } catch (error) {
+      toast.error('Erreur lors de l\'initialisation du paiement');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfirmMobileMoneyPayment = async () => {
+    if (!mobileMoneyTransaction) return;
+
+    setLoading(true);
+    try {
+      await mobileMoneyAPI.confirmPayment(mobileMoneyTransaction.transaction_id);
+      setPaymentStatus('success');
+      refreshCart();
+      setMobileMoneyDialogOpen(false);
+    } catch (error) {
+      toast.error('Erreur lors de la confirmation');
+    } finally {
       setLoading(false);
     }
   };
@@ -269,6 +323,24 @@ const CheckoutPage = () => {
                       <p className="text-sm text-slate-500">Visa, Mastercard, etc.</p>
                     </div>
                   </label>
+
+                  <label className={`flex items-center gap-4 p-4 border rounded-lg cursor-pointer transition-colors ${
+                    formData.payment_method === 'mobile_money' ? 'border-accent bg-accent/5' : 'border-slate-200'
+                  }`}>
+                    <input
+                      type="radio"
+                      name="payment_method"
+                      value="mobile_money"
+                      checked={formData.payment_method === 'mobile_money'}
+                      onChange={(e) => setFormData({ ...formData, payment_method: e.target.value })}
+                      className="w-4 h-4 text-accent"
+                    />
+                    <DeviceMobile className="w-6 h-6 text-slate-600" />
+                    <div>
+                      <p className="font-medium">Mobile Money</p>
+                      <p className="text-sm text-slate-500">MTN, Orange Money, Airtel</p>
+                    </div>
+                  </label>
                 </div>
               </div>
 
@@ -349,6 +421,86 @@ const CheckoutPage = () => {
           </div>
         </div>
       </div>
+
+      {/* Mobile Money Dialog */}
+      <Dialog open={mobileMoneyDialogOpen} onOpenChange={setMobileMoneyDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Paiement Mobile Money</DialogTitle>
+            <DialogDescription>
+              {mobileMoneyTransaction 
+                ? 'Suivez les instructions pour finaliser le paiement'
+                : 'Entrez vos informations de paiement'}
+            </DialogDescription>
+          </DialogHeader>
+          
+          {!mobileMoneyTransaction ? (
+            <div className="space-y-4 pt-4">
+              <div>
+                <Label>Opérateur *</Label>
+                <Select 
+                  value={mobileMoneyData.network} 
+                  onValueChange={(val) => setMobileMoneyData({ ...mobileMoneyData, network: val })}
+                >
+                  <SelectTrigger data-testid="mobile-money-network">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="MTN">MTN Mobile Money</SelectItem>
+                    <SelectItem value="Orange">Orange Money</SelectItem>
+                    <SelectItem value="Airtel">Airtel Money</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Numéro de téléphone *</Label>
+                <Input
+                  value={mobileMoneyData.phone_number}
+                  onChange={(e) => setMobileMoneyData({ ...mobileMoneyData, phone_number: e.target.value })}
+                  placeholder="+237 6XX XXX XXX"
+                  data-testid="mobile-money-phone"
+                />
+              </div>
+              <div className="bg-slate-50 rounded-lg p-4">
+                <p className="text-sm text-slate-600">Montant à payer:</p>
+                <p className="text-2xl font-heading font-bold text-primary">{formatPrice(total)}</p>
+              </div>
+              <Button 
+                className="w-full bg-accent hover:bg-accent-hover"
+                onClick={handleMobileMoneyPayment}
+                disabled={loading}
+                data-testid="initiate-mobile-money"
+              >
+                {loading ? 'Envoi en cours...' : 'Initier le paiement'}
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-4 pt-4">
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <p className="font-semibold text-yellow-800 mb-2">Instructions de paiement</p>
+                <p className="text-sm text-yellow-700">{mobileMoneyTransaction.payment_instruction}</p>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-4 text-center">
+                <p className="text-sm text-slate-600">Transaction ID:</p>
+                <p className="font-mono text-sm">{mobileMoneyTransaction.transaction_id.slice(0, 8)}...</p>
+                <p className="text-sm text-slate-600 mt-2">Montant:</p>
+                <p className="text-xl font-bold text-primary">{formatPrice(mobileMoneyTransaction.amount)}</p>
+              </div>
+              <p className="text-sm text-slate-500 text-center">
+                Une fois le paiement effectué sur votre téléphone, cliquez sur le bouton ci-dessous.
+              </p>
+              <Button 
+                className="w-full bg-green-600 hover:bg-green-700"
+                onClick={handleConfirmMobileMoneyPayment}
+                disabled={loading}
+                data-testid="confirm-mobile-money"
+              >
+                {loading ? 'Vérification...' : 'J\'ai effectué le paiement'}
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 };

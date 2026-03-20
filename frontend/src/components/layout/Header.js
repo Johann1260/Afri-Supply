@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useCart } from '../../context/CartContext';
@@ -12,7 +12,9 @@ import {
   Storefront,
   Package,
   Heart,
-  ChatCircle
+  ChatCircle,
+  Bell,
+  FileText
 } from '@phosphor-icons/react';
 import {
   DropdownMenu,
@@ -23,6 +25,7 @@ import {
 } from '../ui/dropdown-menu';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
+import api from '../../lib/api';
 
 export const Header = () => {
   const { user, isAuthenticated, logout } = useAuth();
@@ -31,6 +34,22 @@ export const Header = () => {
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchUnreadCount();
+    }
+  }, [isAuthenticated]);
+
+  const fetchUnreadCount = async () => {
+    try {
+      const res = await api.get('/notifications/unread-count');
+      setUnreadCount(res.data.unread_count);
+    } catch (error) {
+      console.error('Failed to fetch unread count:', error);
+    }
+  };
 
   const handleSearch = (e) => {
     e.preventDefault();
@@ -75,17 +94,11 @@ export const Header = () => {
         <div className="flex items-center justify-between gap-4">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2" data-testid="logo-link">
-            <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
-              <Storefront className="w-6 h-6 text-white" weight="bold" />
-            </div>
-            <div className="hidden sm:block">
-              <h1 className="font-heading font-bold text-xl text-primary leading-none">
-                AfriSupply
-              </h1>
-              <p className="text-[10px] text-slate-500 uppercase tracking-wider">
-                Zone CEMAC
-              </p>
-            </div>
+            <img 
+              src="https://customer-assets.emergentagent.com/job_supply-connect-40/artifacts/pxemorud_IMG_8426.png" 
+              alt="AfriSupply"
+              className="h-10 w-auto"
+            />
           </Link>
 
           {/* Search bar - Desktop */}
@@ -125,6 +138,22 @@ export const Header = () => {
               )}
             </Link>
 
+            {/* Notifications */}
+            {isAuthenticated && (
+              <Link
+                to="/notifications"
+                className="relative p-2 text-slate-600 hover:text-primary transition-colors"
+                data-testid="notifications-link"
+              >
+                <Bell className="w-6 h-6" weight="bold" />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
+                    {unreadCount}
+                  </span>
+                )}
+              </Link>
+            )}
+
             {/* User menu */}
             {isAuthenticated ? (
               <DropdownMenu>
@@ -163,6 +192,12 @@ export const Header = () => {
                     <Link to="/messages" className="flex items-center gap-2" data-testid="messages-link">
                       <ChatCircle className="w-4 h-4" />
                       Messages
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to="/rfq" className="flex items-center gap-2" data-testid="rfq-link">
+                      <FileText className="w-4 h-4" />
+                      Demandes de devis
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />

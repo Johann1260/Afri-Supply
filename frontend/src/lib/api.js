@@ -111,6 +111,30 @@ export const supplierAPI = {
   getStats: () => api.get('/supplier/stats'),
 };
 
+// RFQ
+export const rfqAPI = {
+  getAll: () => api.get('/rfq'),
+  getById: (id) => api.get(`/rfq/${id}`),
+  create: (data) => api.post('/rfq', data),
+  submitQuote: (id, data) => api.post(`/rfq/${id}/quote`, data),
+  acceptQuote: (id) => api.post(`/rfq/${id}/accept`),
+  rejectQuote: (id) => api.post(`/rfq/${id}/reject`),
+};
+
+// Notifications
+export const notificationsAPI = {
+  getAll: () => api.get('/notifications'),
+  getUnreadCount: () => api.get('/notifications/unread-count'),
+  markAsRead: (id) => api.post(`/notifications/${id}/read`),
+  markAllAsRead: () => api.post('/notifications/read-all'),
+};
+
+// Mobile Money
+export const mobileMoneyAPI = {
+  createPayment: (data) => api.post('/checkout/mobile-money', data),
+  confirmPayment: (transactionId) => api.post(`/checkout/mobile-money/${transactionId}/confirm`),
+};
+
 // Seed Data
 export const seedAPI = {
   seed: () => api.post('/seed'),

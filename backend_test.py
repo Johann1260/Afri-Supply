@@ -147,6 +147,68 @@ class AfriSupplyAPITester:
         """Test getting user favorites"""
         return self.run_test("Get Favorites", "GET", "api/favorites", 200)
 
+    def test_get_rfqs(self):
+        """Test getting RFQs"""
+        return self.run_test("Get RFQs", "GET", "api/rfq", 200)
+
+    def test_create_rfq(self, product_id, supplier_id):
+        """Test creating an RFQ"""
+        return self.run_test(
+            "Create RFQ",
+            "POST",
+            "api/rfq",
+            200,
+            data={
+                "product_id": product_id,
+                "supplier_id": supplier_id,
+                "quantity": 10,
+                "target_price": 50000,
+                "delivery_location": "Douala, Cameroun",
+                "delivery_deadline": "2025-02-15",
+                "specifications": "Test specifications",
+                "notes": "Test RFQ notes"
+            }
+        )
+
+    def test_get_notifications(self):
+        """Test getting notifications"""
+        return self.run_test("Get Notifications", "GET", "api/notifications", 200)
+
+    def test_get_unread_count(self):
+        """Test getting unread notifications count"""
+        return self.run_test("Get Unread Count", "GET", "api/notifications/unread-count", 200)
+
+    def test_get_conversations(self):
+        """Test getting message conversations"""
+        return self.run_test("Get Conversations", "GET", "api/messages/conversations", 200)
+
+    def test_send_message(self, receiver_id):
+        """Test sending a message"""
+        return self.run_test(
+            "Send Message",
+            "POST",
+            "api/messages",
+            200,
+            data={
+                "receiver_id": receiver_id,
+                "content": "Test message from API test"
+            }
+        )
+
+    def test_mobile_money_payment(self):
+        """Test mobile money payment creation (MOCKED)"""
+        return self.run_test(
+            "Create Mobile Money Payment",
+            "POST",
+            "api/checkout/mobile-money",
+            200,
+            data={
+                "phone_number": "+237612345678",
+                "network": "MTN",
+                "country_code": "CM"
+            }
+        )
+
 def main():
     print("🚀 Starting AfriSupply API Tests")
     print("=" * 50)
@@ -163,6 +225,9 @@ def main():
     
     # Test buyer authentication and features
     print("\n👤 Testing Buyer Authentication & Features")
+    buyer_product_id = None
+    supplier_id = None
+    
     if tester.test_login_buyer():
         tester.test_get_me()
         tester.test_get_cart()
@@ -172,8 +237,27 @@ def main():
         # Test adding to cart (get first product)
         success, products = tester.run_test("Get Products for Cart Test", "GET", "api/products?limit=1", 200)
         if success and products and len(products) > 0:
-            product_id = products[0]['id']
-            tester.test_add_to_cart(product_id)
+            buyer_product_id = products[0]['id']
+            supplier_id = products[0].get('supplier_id')
+            tester.test_add_to_cart(buyer_product_id)
+        
+        # Test new features for buyer
+        print("\n🆕 Testing New Features (Buyer)")
+        tester.test_get_notifications()
+        tester.test_get_unread_count()
+        tester.test_get_conversations()
+        tester.test_get_rfqs()
+        
+        # Test RFQ creation if we have product and supplier
+        if buyer_product_id and supplier_id:
+            tester.test_create_rfq(buyer_product_id, supplier_id)
+        
+        # Test mobile money payment (MOCKED)
+        tester.test_mobile_money_payment()
+        
+        # Test sending message if we have supplier
+        if supplier_id:
+            tester.test_send_message(supplier_id)
     
     # Reset token for supplier tests
     tester.token = None
@@ -184,6 +268,12 @@ def main():
         tester.test_get_me()
         tester.test_get_supplier_products()
         tester.test_get_supplier_stats()
+        
+        # Test new features for supplier
+        print("\n🆕 Testing New Features (Supplier)")
+        tester.test_get_notifications()
+        tester.test_get_conversations()
+        tester.test_get_rfqs()
     
     # Print final results
     print("\n" + "=" * 50)

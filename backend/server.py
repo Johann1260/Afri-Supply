@@ -281,6 +281,77 @@ class PaymentStatusResponse(BaseModel):
     payment_status: str
     order_id: Optional[str] = None
 
+# ======================= RFQ MODELS =======================
+
+class RFQCreate(BaseModel):
+    product_id: str
+    supplier_id: str
+    quantity: int
+    target_price: Optional[float] = None
+    delivery_location: str
+    delivery_deadline: Optional[str] = None
+    specifications: Optional[str] = None
+    notes: Optional[str] = None
+
+class RFQResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    rfq_number: str
+    product_id: str
+    product_name: str
+    supplier_id: str
+    supplier_name: str
+    buyer_id: str
+    buyer_name: str
+    buyer_company: Optional[str] = None
+    quantity: int
+    target_price: Optional[float] = None
+    quoted_price: Optional[float] = None
+    delivery_location: str
+    delivery_deadline: Optional[str] = None
+    specifications: Optional[str] = None
+    notes: Optional[str] = None
+    status: str  # pending, quoted, accepted, rejected, expired
+    supplier_response: Optional[str] = None
+    created_at: str
+    updated_at: Optional[str] = None
+
+class RFQQuote(BaseModel):
+    quoted_price: float
+    delivery_time: Optional[str] = None
+    response_notes: Optional[str] = None
+
+# ======================= MOBILE MONEY MODELS =======================
+
+class MobileMoneyPaymentRequest(BaseModel):
+    phone_number: str
+    network: str  # MTN, Orange, Airtel
+    country_code: str = "CM"  # Default Cameroon
+
+class MobileMoneyPaymentResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    transaction_id: str
+    status: str
+    amount: float
+    currency: str
+    phone_number: str
+    network: str
+    payment_instruction: str
+    created_at: str
+
+# ======================= NOTIFICATION MODELS =======================
+
+class NotificationResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    user_id: str
+    type: str  # order, message, rfq, review, system
+    title: str
+    message: str
+    is_read: bool
+    related_id: Optional[str] = None
+    created_at: str
+
 # ======================= AUTH HELPERS =======================
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -1093,18 +1164,410 @@ async def get_supplier_stats(current_user: dict = Depends(get_current_user)):
     
     products_count = await db.products.count_documents({"supplier_id": current_user["id"]})
     orders = await db.orders.find({"supplier_id": current_user["id"]}, {"_id": 0}).to_list(1000)
+    rfqs = await db.rfqs.find({"supplier_id": current_user["id"]}, {"_id": 0}).to_list(1000)
     
     total_revenue = sum(o.get("total", 0) for o in orders if o.get("payment_status") == "paid")
     pending_orders = sum(1 for o in orders if o.get("status") == "pending")
     completed_orders = sum(1 for o in orders if o.get("status") == "delivered")
+    pending_rfqs = sum(1 for r in rfqs if r.get("status") == "pending")
     
     return {
         "products_count": products_count,
         "total_orders": len(orders),
         "pending_orders": pending_orders,
         "completed_orders": completed_orders,
-        "total_revenue": total_revenue
+        "total_revenue": total_revenue,
+        "pending_rfqs": pending_rfqs,
+        "total_rfqs": len(rfqs)
     }
+
+# ======================= RFQ (REQUEST FOR QUOTE) ENDPOINTS =======================
+
+@api_router.post("/rfq", response_model=RFQResponse)
+async def create_rfq(rfq: RFQCreate, current_user: dict = Depends(get_current_user)):
+    """Create a Request for Quote"""
+    product = await db.products.find_one({"id": rfq.product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    supplier = await db.users.find_one({"id": rfq.supplier_id}, {"_id": 0})
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    
+    rfq_id = str(uuid.uuid4())
+    rfq_number = f"RFQ-{datetime.now().strftime('%Y%m%d')}-{rfq_id[:8].upper()}"
+    now = datetime.now(timezone.utc).isoformat()
+    
+    rfq_doc = {
+        "id": rfq_id,
+        "rfq_number": rfq_number,
+        "product_id": rfq.product_id,
+        "product_name": product["name"],
+        "supplier_id": rfq.supplier_id,
+        "supplier_name": supplier["full_name"],
+        "buyer_id": current_user["id"],
+        "buyer_name": current_user["full_name"],
+        "buyer_company": current_user.get("company_name"),
+        "quantity": rfq.quantity,
+        "target_price": rfq.target_price,
+        "quoted_price": None,
+        "delivery_location": rfq.delivery_location,
+        "delivery_deadline": rfq.delivery_deadline,
+        "specifications": rfq.specifications,
+        "notes": rfq.notes,
+        "status": "pending",
+        "supplier_response": None,
+        "created_at": now,
+        "updated_at": None
+    }
+    
+    await db.rfqs.insert_one(rfq_doc)
+    
+    # Create notification for supplier
+    await create_notification(
+        user_id=rfq.supplier_id,
+        type="rfq",
+        title="Nouvelle demande de devis",
+        message=f"{current_user['full_name']} a demandé un devis pour {product['name']} (Qté: {rfq.quantity})",
+        related_id=rfq_id
+    )
+    
+    return RFQResponse(**rfq_doc)
+
+@api_router.get("/rfq", response_model=List[RFQResponse])
+async def get_rfqs(current_user: dict = Depends(get_current_user)):
+    """Get all RFQs for current user (as buyer or supplier)"""
+    query = {"$or": [{"buyer_id": current_user["id"]}, {"supplier_id": current_user["id"]}]}
+    rfqs = await db.rfqs.find(query, {"_id": 0}).sort("created_at", -1).to_list(100)
+    return rfqs
+
+@api_router.get("/rfq/{rfq_id}", response_model=RFQResponse)
+async def get_rfq(rfq_id: str, current_user: dict = Depends(get_current_user)):
+    """Get a specific RFQ"""
+    rfq = await db.rfqs.find_one({"id": rfq_id}, {"_id": 0})
+    if not rfq:
+        raise HTTPException(status_code=404, detail="RFQ not found")
+    if rfq["buyer_id"] != current_user["id"] and rfq["supplier_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return rfq
+
+@api_router.post("/rfq/{rfq_id}/quote", response_model=RFQResponse)
+async def submit_quote(rfq_id: str, quote: RFQQuote, current_user: dict = Depends(get_current_user)):
+    """Supplier submits a quote for an RFQ"""
+    rfq = await db.rfqs.find_one({"id": rfq_id}, {"_id": 0})
+    if not rfq:
+        raise HTTPException(status_code=404, detail="RFQ not found")
+    if rfq["supplier_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Only the supplier can quote this RFQ")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    await db.rfqs.update_one(
+        {"id": rfq_id},
+        {"$set": {
+            "quoted_price": quote.quoted_price,
+            "supplier_response": quote.response_notes,
+            "status": "quoted",
+            "updated_at": now
+        }}
+    )
+    
+    # Create notification for buyer
+    await create_notification(
+        user_id=rfq["buyer_id"],
+        type="rfq",
+        title="Devis reçu",
+        message=f"{current_user['full_name']} a soumis un devis de {quote.quoted_price:,.0f} XAF pour votre demande",
+        related_id=rfq_id
+    )
+    
+    updated_rfq = await db.rfqs.find_one({"id": rfq_id}, {"_id": 0})
+    return RFQResponse(**updated_rfq)
+
+@api_router.post("/rfq/{rfq_id}/accept")
+async def accept_quote(rfq_id: str, current_user: dict = Depends(get_current_user)):
+    """Buyer accepts a quote"""
+    rfq = await db.rfqs.find_one({"id": rfq_id}, {"_id": 0})
+    if not rfq:
+        raise HTTPException(status_code=404, detail="RFQ not found")
+    if rfq["buyer_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Only the buyer can accept this quote")
+    if rfq["status"] != "quoted":
+        raise HTTPException(status_code=400, detail="Quote not yet submitted")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    await db.rfqs.update_one(
+        {"id": rfq_id},
+        {"$set": {"status": "accepted", "updated_at": now}}
+    )
+    
+    # Create notification for supplier
+    await create_notification(
+        user_id=rfq["supplier_id"],
+        type="rfq",
+        title="Devis accepté",
+        message=f"{current_user['full_name']} a accepté votre devis pour {rfq['product_name']}",
+        related_id=rfq_id
+    )
+    
+    return {"message": "Quote accepted"}
+
+@api_router.post("/rfq/{rfq_id}/reject")
+async def reject_quote(rfq_id: str, current_user: dict = Depends(get_current_user)):
+    """Buyer rejects a quote"""
+    rfq = await db.rfqs.find_one({"id": rfq_id}, {"_id": 0})
+    if not rfq:
+        raise HTTPException(status_code=404, detail="RFQ not found")
+    if rfq["buyer_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Only the buyer can reject this quote")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    await db.rfqs.update_one(
+        {"id": rfq_id},
+        {"$set": {"status": "rejected", "updated_at": now}}
+    )
+    
+    # Create notification for supplier
+    await create_notification(
+        user_id=rfq["supplier_id"],
+        type="rfq",
+        title="Devis refusé",
+        message=f"{current_user['full_name']} a refusé votre devis pour {rfq['product_name']}",
+        related_id=rfq_id
+    )
+    
+    return {"message": "Quote rejected"}
+
+# ======================= MOBILE MONEY ENDPOINTS =======================
+
+@api_router.post("/checkout/mobile-money", response_model=MobileMoneyPaymentResponse)
+async def create_mobile_money_payment(
+    request: MobileMoneyPaymentRequest, 
+    current_user: dict = Depends(get_current_user)
+):
+    """Create a Mobile Money payment (MOCKED for demo)"""
+    cart = await db.carts.find_one({"user_id": current_user["id"]}, {"_id": 0})
+    if not cart or not cart.get("items"):
+        raise HTTPException(status_code=400, detail="Cart is empty")
+    
+    # Calculate total
+    total = 0.0
+    for item in cart["items"]:
+        product = await db.products.find_one({"id": item["product_id"]}, {"_id": 0})
+        if product:
+            total += product["price"] * item["quantity"]
+    
+    total += 5000.0  # Shipping fee
+    
+    transaction_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Create MOCKED mobile money transaction
+    transaction_doc = {
+        "id": transaction_id,
+        "user_id": current_user["id"],
+        "amount": total,
+        "currency": "XAF",
+        "phone_number": request.phone_number,
+        "network": request.network,
+        "country_code": request.country_code,
+        "status": "pending",
+        "payment_type": "mobile_money",
+        "created_at": now
+    }
+    
+    await db.payment_transactions.insert_one(transaction_doc)
+    
+    # Generate payment instruction based on network
+    network_instructions = {
+        "MTN": f"Composez *126# sur votre téléphone MTN et suivez les instructions pour valider le paiement de {total:,.0f} XAF",
+        "Orange": f"Composez #150*1# sur votre Orange Money et validez le paiement de {total:,.0f} XAF",
+        "Airtel": f"Composez *500# sur Airtel Money et confirmez le paiement de {total:,.0f} XAF"
+    }
+    
+    return MobileMoneyPaymentResponse(
+        transaction_id=transaction_id,
+        status="pending",
+        amount=total,
+        currency="XAF",
+        phone_number=request.phone_number,
+        network=request.network,
+        payment_instruction=network_instructions.get(request.network, "Vérifiez votre téléphone pour valider le paiement"),
+        created_at=now
+    )
+
+@api_router.post("/checkout/mobile-money/{transaction_id}/confirm")
+async def confirm_mobile_money_payment(transaction_id: str, current_user: dict = Depends(get_current_user)):
+    """Confirm Mobile Money payment (MOCKED - simulates successful payment)"""
+    transaction = await db.payment_transactions.find_one({"id": transaction_id}, {"_id": 0})
+    if not transaction:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    if transaction["user_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Update transaction status (MOCKED as successful)
+    await db.payment_transactions.update_one(
+        {"id": transaction_id},
+        {"$set": {"status": "completed", "completed_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    # Create order notification
+    await create_notification(
+        user_id=current_user["id"],
+        type="order",
+        title="Paiement confirmé",
+        message=f"Votre paiement Mobile Money de {transaction['amount']:,.0f} XAF a été confirmé",
+        related_id=transaction_id
+    )
+    
+    return {"message": "Payment confirmed", "status": "completed"}
+
+# ======================= NOTIFICATIONS ENDPOINTS =======================
+
+async def create_notification(user_id: str, type: str, title: str, message: str, related_id: Optional[str] = None):
+    """Helper function to create notifications"""
+    notification_doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "type": type,
+        "title": title,
+        "message": message,
+        "is_read": False,
+        "related_id": related_id,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.notifications.insert_one(notification_doc)
+    
+    # Log notification (MOCKED email would be sent here)
+    logger.info(f"[NOTIFICATION] To: {user_id} | Type: {type} | {title}: {message}")
+    
+    return notification_doc
+
+@api_router.get("/notifications", response_model=List[NotificationResponse])
+async def get_notifications(current_user: dict = Depends(get_current_user)):
+    """Get all notifications for current user"""
+    notifications = await db.notifications.find(
+        {"user_id": current_user["id"]},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(50)
+    return notifications
+
+@api_router.get("/notifications/unread-count")
+async def get_unread_count(current_user: dict = Depends(get_current_user)):
+    """Get count of unread notifications"""
+    count = await db.notifications.count_documents({
+        "user_id": current_user["id"],
+        "is_read": False
+    })
+    return {"unread_count": count}
+
+@api_router.post("/notifications/{notification_id}/read")
+async def mark_notification_read(notification_id: str, current_user: dict = Depends(get_current_user)):
+    """Mark a notification as read"""
+    await db.notifications.update_one(
+        {"id": notification_id, "user_id": current_user["id"]},
+        {"$set": {"is_read": True}}
+    )
+    return {"message": "Marked as read"}
+
+@api_router.post("/notifications/read-all")
+async def mark_all_read(current_user: dict = Depends(get_current_user)):
+    """Mark all notifications as read"""
+    await db.notifications.update_many(
+        {"user_id": current_user["id"], "is_read": False},
+        {"$set": {"is_read": True}}
+    )
+    return {"message": "All notifications marked as read"}
+
+# ======================= ENHANCED REVIEWS ENDPOINTS =======================
+
+@api_router.post("/reviews", response_model=ReviewResponse)
+async def create_review(review: ReviewCreate, current_user: dict = Depends(get_current_user)):
+    # Verify order exists and belongs to user
+    order = await db.orders.find_one({"id": review.order_id, "buyer_id": current_user["id"]}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    # Check if user already reviewed this product in this order
+    existing = await db.reviews.find_one({
+        "product_id": review.product_id,
+        "order_id": review.order_id,
+        "user_id": current_user["id"]
+    }, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=400, detail="You already reviewed this product")
+    
+    product = await db.products.find_one({"id": review.product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    review_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    
+    review_doc = {
+        "id": review_id,
+        "product_id": review.product_id,
+        "order_id": review.order_id,
+        "user_id": current_user["id"],
+        "user_name": current_user["full_name"],
+        "rating": review.rating,
+        "comment": review.comment,
+        "created_at": now
+    }
+    
+    await db.reviews.insert_one(review_doc)
+    
+    # Update product rating
+    reviews = await db.reviews.find({"product_id": review.product_id}, {"_id": 0}).to_list(1000)
+    avg_rating = sum(r["rating"] for r in reviews) / len(reviews)
+    await db.products.update_one(
+        {"id": review.product_id},
+        {"$set": {"rating": round(avg_rating, 1), "review_count": len(reviews)}}
+    )
+    
+    # Notify supplier
+    await create_notification(
+        user_id=product["supplier_id"],
+        type="review",
+        title="Nouvel avis",
+        message=f"{current_user['full_name']} a laissé un avis {review.rating}/5 sur {product['name']}",
+        related_id=review.product_id
+    )
+    
+    return ReviewResponse(**review_doc)
+
+@api_router.get("/reviews/pending", response_model=List[dict])
+async def get_pending_reviews(current_user: dict = Depends(get_current_user)):
+    """Get products that can be reviewed (from delivered orders without review)"""
+    # Get delivered orders
+    orders = await db.orders.find({
+        "buyer_id": current_user["id"],
+        "status": "delivered"
+    }, {"_id": 0}).to_list(100)
+    
+    pending_reviews = []
+    for order in orders:
+        for item in order.get("items", []):
+            # Check if already reviewed
+            existing = await db.reviews.find_one({
+                "product_id": item["product_id"],
+                "order_id": order["id"],
+                "user_id": current_user["id"]
+            })
+            if not existing:
+                product = await db.products.find_one({"id": item["product_id"]}, {"_id": 0})
+                if product:
+                    pending_reviews.append({
+                        "order_id": order["id"],
+                        "order_number": order["order_number"],
+                        "product_id": item["product_id"],
+                        "product_name": item["product_name"],
+                        "product_image": product.get("images", [None])[0]
+                    })
+    
+    return pending_reviews
 
 # ======================= WEBSOCKET FOR CHAT =======================
 

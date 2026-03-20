@@ -51,13 +51,11 @@ export const Footer = () => {
           {/* Brand */}
           <div className="lg:col-span-2">
             <Link to="/" className="flex items-center gap-3 mb-6">
-              <div className="w-12 h-12 bg-white/10 rounded-lg flex items-center justify-center">
-                <Storefront className="w-7 h-7 text-white" weight="bold" />
-              </div>
-              <div>
-                <h2 className="font-heading font-bold text-2xl">AfriSupply</h2>
-                <p className="text-sm text-white/60">Zone CEMAC</p>
-              </div>
+              <img 
+                src="https://customer-assets.emergentagent.com/job_supply-connect-40/artifacts/pxemorud_IMG_8426.png" 
+                alt="AfriSupply"
+                className="h-12 w-auto"
+              />
             </Link>
             <p className="text-white/70 mb-6 max-w-sm">
               La première marketplace B2B industrielle connectant fournisseurs et entreprises 

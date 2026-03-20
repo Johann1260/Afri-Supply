@@ -16,6 +16,10 @@ import {
   DashboardPage
 } from "./pages";
 
+import MessagesPage from "./pages/MessagesPage";
+import NotificationsPage from "./pages/NotificationsPage";
+import RFQPage from "./pages/RFQPage";
+
 function App() {
   return (
     <AuthProvider>
@@ -35,7 +39,11 @@ function App() {
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/dashboard/*" element={<DashboardPage />} />
             <Route path="/favorites" element={<DashboardPage />} />
-            <Route path="/messages" element={<DashboardPage />} />
+            <Route path="/messages" element={<MessagesPage />} />
+            <Route path="/messages/:partnerId" element={<MessagesPage />} />
+            <Route path="/notifications" element={<NotificationsPage />} />
+            <Route path="/rfq" element={<RFQPage />} />
+            <Route path="/rfq/:rfqId" element={<RFQPage />} />
             <Route path="/orders/:id" element={<DashboardPage />} />
             <Route path="/suppliers" element={<ProductsPage />} />
             <Route path="/blog" element={<HomePage />} />
