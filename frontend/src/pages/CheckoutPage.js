@@ -2,8 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { 
   CreditCard, 
-  MapPin,
-  Truck,
   ShieldCheck,
   CheckCircle,
   XCircle,
@@ -104,12 +102,7 @@ const CheckoutPage = () => {
     }
   }, [isAuthenticated, navigate]);
 
-  const countries = [
-    'Cameroun', 'Gabon', 'Congo', 'Tchad', 'Guinée Équatoriale', 'Centrafrique',
-  ];
-
-  const shippingFee = 5000;
-  const total = cart.total + shippingFee;
+  const total = cart.total;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -243,59 +236,6 @@ const CheckoutPage = () => {
           {/* Checkout form */}
           <div className="lg:col-span-2">
             <form onSubmit={handleSubmit} className="space-y-6">
-              {/* Shipping address */}
-              <div className="bg-white border border-slate-200 rounded-lg p-6">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
-                    <MapPin className="w-5 h-5 text-primary" />
-                  </div>
-                  <h2 className="font-heading font-bold text-lg">Adresse de livraison</h2>
-                </div>
-
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div className="md:col-span-2">
-                    <Label htmlFor="shipping_address">Adresse complète *</Label>
-                    <Textarea
-                      id="shipping_address"
-                      value={formData.shipping_address}
-                      onChange={(e) => setFormData({ ...formData, shipping_address: e.target.value })}
-                      placeholder="Numéro, rue, quartier..."
-                      required
-                      data-testid="shipping-address"
-                    />
-                  </div>
-                  
-                  <div>
-                    <Label htmlFor="shipping_city">Ville *</Label>
-                    <Input
-                      id="shipping_city"
-                      value={formData.shipping_city}
-                      onChange={(e) => setFormData({ ...formData, shipping_city: e.target.value })}
-                      placeholder="Douala"
-                      required
-                      data-testid="shipping-city"
-                    />
-                  </div>
-
-                  <div>
-                    <Label htmlFor="shipping_country">Pays *</Label>
-                    <Select 
-                      value={formData.shipping_country} 
-                      onValueChange={(val) => setFormData({ ...formData, shipping_country: val })}
-                    >
-                      <SelectTrigger data-testid="shipping-country">
-                        <SelectValue placeholder="Sélectionner" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {countries.map((c) => (
-                          <SelectItem key={c} value={c}>{c}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </div>
-
               {/* Payment method */}
               <div className="bg-white border border-slate-200 rounded-lg p-6">
                 <div className="flex items-center gap-3 mb-4">
@@ -392,14 +332,6 @@ const CheckoutPage = () => {
               </div>
 
               <div className="border-t pt-4 space-y-2">
-                <div className="flex justify-between text-slate-600">
-                  <span>Sous-total</span>
-                  <span>{formatPrice(cart.total)}</span>
-                </div>
-                <div className="flex justify-between text-slate-600">
-                  <span>Livraison</span>
-                  <span>{formatPrice(shippingFee)}</span>
-                </div>
                 <div className="border-t pt-2 flex justify-between font-heading font-bold text-lg">
                   <span>Total</span>
                   <span className="text-primary">{formatPrice(total)}</span>
@@ -411,10 +343,6 @@ const CheckoutPage = () => {
                 <div className="flex items-center gap-2 text-slate-500">
                   <ShieldCheck className="w-5 h-5" />
                   <span className="text-xs">Paiement sécurisé</span>
-                </div>
-                <div className="flex items-center gap-2 text-slate-500">
-                  <Truck className="w-5 h-5" />
-                  <span className="text-xs">Livraison CEMAC</span>
                 </div>
               </div>
             </div>

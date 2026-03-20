@@ -176,9 +176,6 @@ class OrderItemCreate(BaseModel):
     price: float
 
 class OrderCreate(BaseModel):
-    shipping_address: str
-    shipping_city: str
-    shipping_country: str
     payment_method: str = "stripe"
     notes: Optional[str] = None
 
@@ -192,13 +189,9 @@ class OrderResponse(BaseModel):
     supplier_name: str
     items: List[Dict[str, Any]]
     subtotal: float
-    shipping_fee: float
     total: float
     status: str
     payment_status: str
-    shipping_address: str
-    shipping_city: str
-    shipping_country: str
     notes: Optional[str] = None
     created_at: str
 
@@ -218,6 +211,47 @@ class ReviewResponse(BaseModel):
     rating: int
     comment: Optional[str] = None
     created_at: str
+
+# ======================= SUPPLIER RATING MODELS =======================
+
+class SupplierRatingCreate(BaseModel):
+    supplier_id: str
+    order_id: str
+    rating: int = Field(..., ge=1, le=5)
+    communication_rating: int = Field(..., ge=1, le=5)
+    quality_rating: int = Field(..., ge=1, le=5)
+    delivery_rating: int = Field(..., ge=1, le=5)
+    comment: Optional[str] = None
+
+class SupplierRatingResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    supplier_id: str
+    buyer_id: str
+    buyer_name: str
+    order_id: str
+    rating: float
+    communication_rating: int
+    quality_rating: int
+    delivery_rating: int
+    comment: Optional[str] = None
+    created_at: str
+
+class SupplierProfileResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    full_name: str
+    company_name: Optional[str] = None
+    country: Optional[str] = None
+    city: Optional[str] = None
+    rating: float = 0.0
+    rating_count: int = 0
+    communication_avg: float = 0.0
+    quality_avg: float = 0.0
+    delivery_avg: float = 0.0
+    products_count: int = 0
+    orders_completed: int = 0
+    member_since: str
 
 class MessageCreate(BaseModel):
     receiver_id: str
@@ -801,7 +835,6 @@ async def create_orders(order_data: OrderCreate, current_user: dict = Depends(ge
     for supplier_id, items in supplier_items.items():
         supplier = await db.users.find_one({"id": supplier_id}, {"_id": 0})
         subtotal = sum(item["subtotal"] for item in items)
-        shipping_fee = 5000.0  # Fixed shipping fee in XAF
         
         order_id = str(uuid.uuid4())
         order_number = f"AS-{datetime.now().strftime('%Y%m%d')}-{order_id[:8].upper()}"
@@ -815,14 +848,10 @@ async def create_orders(order_data: OrderCreate, current_user: dict = Depends(ge
             "supplier_name": supplier.get("full_name") if supplier else "Unknown",
             "items": items,
             "subtotal": subtotal,
-            "shipping_fee": shipping_fee,
-            "total": subtotal + shipping_fee,
+            "total": subtotal,
             "status": "pending",
             "payment_status": "pending",
             "payment_method": order_data.payment_method,
-            "shipping_address": order_data.shipping_address,
-            "shipping_city": order_data.shipping_city,
-            "shipping_country": order_data.shipping_country,
             "notes": order_data.notes,
             "created_at": now
         }
@@ -881,8 +910,6 @@ async def create_checkout_session(request: CheckoutRequest, http_request: Reques
         product = await db.products.find_one({"id": item["product_id"]}, {"_id": 0})
         if product:
             total += product["price"] * item["quantity"]
-    
-    total += 5000.0  # Shipping fee
     
     # Convert XAF to USD (approximate rate)
     total_usd = round(total / 600, 2)
@@ -1155,6 +1182,149 @@ async def create_blog_post(post: BlogPostCreate, current_user: dict = Depends(ge
     await db.blog_posts.insert_one(post_doc)
     return BlogPostResponse(**post_doc)
 
+# ======================= SUPPLIER RATING ENDPOINTS =======================
+
+@api_router.post("/suppliers/{supplier_id}/rate", response_model=SupplierRatingResponse)
+async def rate_supplier(supplier_id: str, rating: SupplierRatingCreate, current_user: dict = Depends(get_current_user)):
+    """Rate a supplier after a completed order"""
+    if rating.supplier_id != supplier_id:
+        raise HTTPException(status_code=400, detail="Supplier ID mismatch")
+    
+    # Verify order exists and is completed
+    order = await db.orders.find_one({
+        "id": rating.order_id,
+        "buyer_id": current_user["id"],
+        "supplier_id": supplier_id,
+        "status": "delivered"
+    }, {"_id": 0})
+    
+    if not order:
+        raise HTTPException(status_code=404, detail="Completed order not found")
+    
+    # Check if already rated
+    existing = await db.supplier_ratings.find_one({
+        "order_id": rating.order_id,
+        "buyer_id": current_user["id"]
+    })
+    if existing:
+        raise HTTPException(status_code=400, detail="Already rated this order")
+    
+    rating_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Calculate overall rating
+    overall_rating = (rating.communication_rating + rating.quality_rating + rating.delivery_rating + rating.rating) / 4
+    
+    rating_doc = {
+        "id": rating_id,
+        "supplier_id": supplier_id,
+        "buyer_id": current_user["id"],
+        "buyer_name": current_user["full_name"],
+        "order_id": rating.order_id,
+        "rating": round(overall_rating, 1),
+        "communication_rating": rating.communication_rating,
+        "quality_rating": rating.quality_rating,
+        "delivery_rating": rating.delivery_rating,
+        "comment": rating.comment,
+        "created_at": now
+    }
+    
+    await db.supplier_ratings.insert_one(rating_doc)
+    
+    # Update supplier's average rating
+    all_ratings = await db.supplier_ratings.find({"supplier_id": supplier_id}, {"_id": 0}).to_list(1000)
+    if all_ratings:
+        avg_rating = sum(r["rating"] for r in all_ratings) / len(all_ratings)
+        avg_comm = sum(r["communication_rating"] for r in all_ratings) / len(all_ratings)
+        avg_quality = sum(r["quality_rating"] for r in all_ratings) / len(all_ratings)
+        avg_delivery = sum(r["delivery_rating"] for r in all_ratings) / len(all_ratings)
+        
+        await db.users.update_one(
+            {"id": supplier_id},
+            {"$set": {
+                "supplier_rating": round(avg_rating, 1),
+                "rating_count": len(all_ratings),
+                "communication_avg": round(avg_comm, 1),
+                "quality_avg": round(avg_quality, 1),
+                "delivery_avg": round(avg_delivery, 1)
+            }}
+        )
+    
+    # Notify supplier
+    await create_notification(
+        user_id=supplier_id,
+        type="review",
+        title="Nouvelle évaluation",
+        message=f"{current_user['full_name']} vous a attribué une note de {overall_rating:.1f}/5",
+        related_id=rating_id
+    )
+    
+    return SupplierRatingResponse(**rating_doc)
+
+@api_router.get("/suppliers/{supplier_id}/ratings", response_model=List[SupplierRatingResponse])
+async def get_supplier_ratings(supplier_id: str):
+    """Get all ratings for a supplier"""
+    ratings = await db.supplier_ratings.find({"supplier_id": supplier_id}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    return ratings
+
+@api_router.get("/suppliers/{supplier_id}/profile", response_model=SupplierProfileResponse)
+async def get_supplier_profile(supplier_id: str):
+    """Get supplier profile with ratings"""
+    supplier = await db.users.find_one({"id": supplier_id, "user_type": "supplier"}, {"_id": 0})
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    
+    products_count = await db.products.count_documents({"supplier_id": supplier_id})
+    orders_completed = await db.orders.count_documents({"supplier_id": supplier_id, "status": "delivered"})
+    
+    return SupplierProfileResponse(
+        id=supplier["id"],
+        full_name=supplier["full_name"],
+        company_name=supplier.get("company_name"),
+        country=supplier.get("country"),
+        city=supplier.get("city"),
+        rating=supplier.get("supplier_rating", 0.0),
+        rating_count=supplier.get("rating_count", 0),
+        communication_avg=supplier.get("communication_avg", 0.0),
+        quality_avg=supplier.get("quality_avg", 0.0),
+        delivery_avg=supplier.get("delivery_avg", 0.0),
+        products_count=products_count,
+        orders_completed=orders_completed,
+        member_since=supplier["created_at"]
+    )
+
+@api_router.get("/suppliers", response_model=List[SupplierProfileResponse])
+async def get_suppliers(sort_by: str = "rating", limit: int = 20):
+    """Get list of suppliers"""
+    suppliers = await db.users.find({"user_type": "supplier"}, {"_id": 0}).to_list(limit)
+    
+    result = []
+    for supplier in suppliers:
+        products_count = await db.products.count_documents({"supplier_id": supplier["id"]})
+        orders_completed = await db.orders.count_documents({"supplier_id": supplier["id"], "status": "delivered"})
+        
+        result.append(SupplierProfileResponse(
+            id=supplier["id"],
+            full_name=supplier["full_name"],
+            company_name=supplier.get("company_name"),
+            country=supplier.get("country"),
+            city=supplier.get("city"),
+            rating=supplier.get("supplier_rating", 0.0),
+            rating_count=supplier.get("rating_count", 0),
+            communication_avg=supplier.get("communication_avg", 0.0),
+            quality_avg=supplier.get("quality_avg", 0.0),
+            delivery_avg=supplier.get("delivery_avg", 0.0),
+            products_count=products_count,
+            orders_completed=orders_completed,
+            member_since=supplier["created_at"]
+        ))
+    
+    # Sort by rating
+    if sort_by == "rating":
+        result.sort(key=lambda x: x.rating, reverse=True)
+    
+    return result
+
 # ======================= SUPPLIER STATS =======================
 
 @api_router.get("/supplier/stats")
@@ -1358,8 +1528,6 @@ async def create_mobile_money_payment(
         product = await db.products.find_one({"id": item["product_id"]}, {"_id": 0})
         if product:
             total += product["price"] * item["quantity"]
-    
-    total += 5000.0  # Shipping fee
     
     transaction_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()

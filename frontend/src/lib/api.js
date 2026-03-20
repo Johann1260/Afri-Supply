@@ -109,6 +109,10 @@ export const blogAPI = {
 // Supplier Stats
 export const supplierAPI = {
   getStats: () => api.get('/supplier/stats'),
+  getAll: (params) => api.get('/suppliers', { params }),
+  getProfile: (id) => api.get(`/suppliers/${id}/profile`),
+  getRatings: (id) => api.get(`/suppliers/${id}/ratings`),
+  rateSupplier: (id, data) => api.post(`/suppliers/${id}/rate`, data),
 };
 
 // RFQ

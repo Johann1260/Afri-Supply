@@ -45,8 +45,7 @@ const CartPage = () => {
     navigate('/checkout');
   };
 
-  const shippingFee = cart.item_count > 0 ? 5000 : 0;
-  const total = cart.total + shippingFee;
+  const total = cart.total;
 
   return (
     <Layout>
@@ -162,10 +161,6 @@ const CartPage = () => {
                     <span>Sous-total ({cart.item_count} articles)</span>
                     <span>{formatPrice(cart.total)}</span>
                   </div>
-                  <div className="flex justify-between text-slate-600">
-                    <span>Frais de livraison</span>
-                    <span>{formatPrice(shippingFee)}</span>
-                  </div>
                   <div className="border-t pt-3 flex justify-between font-heading font-bold text-lg">
                     <span>Total</span>
                     <span className="text-primary">{formatPrice(total)}</span>
@@ -183,7 +178,7 @@ const CartPage = () => {
                 </Button>
 
                 <p className="text-xs text-slate-500 text-center mt-4">
-                  Paiement sécurisé par Stripe
+                  Paiement sécurisé par Stripe ou Mobile Money
                 </p>
               </div>
             </div>

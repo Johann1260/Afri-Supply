@@ -209,6 +209,31 @@ class AfriSupplyAPITester:
             }
         )
 
+    def test_get_suppliers(self):
+        """Test getting suppliers list"""
+        return self.run_test("Get Suppliers", "GET", "api/suppliers", 200)
+
+    def test_get_supplier_profile(self, supplier_id):
+        """Test getting supplier profile"""
+        return self.run_test("Get Supplier Profile", "GET", f"api/suppliers/{supplier_id}/profile", 200)
+
+    def test_get_supplier_ratings(self, supplier_id):
+        """Test getting supplier ratings"""
+        return self.run_test("Get Supplier Ratings", "GET", f"api/suppliers/{supplier_id}/ratings", 200)
+
+    def test_create_order_without_shipping(self):
+        """Test creating order without shipping fields"""
+        return self.run_test(
+            "Create Order (No Shipping)",
+            "POST",
+            "api/orders",
+            200,
+            data={
+                "payment_method": "stripe",
+                "notes": "Test order without shipping"
+            }
+        )
+
 def main():
     print("🚀 Starting AfriSupply API Tests")
     print("=" * 50)
@@ -258,6 +283,16 @@ def main():
         # Test sending message if we have supplier
         if supplier_id:
             tester.test_send_message(supplier_id)
+        
+        # Test new supplier-related endpoints
+        print("\n🏪 Testing Supplier-Related Features")
+        tester.test_get_suppliers()
+        if supplier_id:
+            tester.test_get_supplier_profile(supplier_id)
+            tester.test_get_supplier_ratings(supplier_id)
+        
+        # Test order creation without shipping
+        tester.test_create_order_without_shipping()
     
     # Reset token for supplier tests
     tester.token = None

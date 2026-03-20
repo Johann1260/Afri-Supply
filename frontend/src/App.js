@@ -19,6 +19,7 @@ import {
 import MessagesPage from "./pages/MessagesPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import RFQPage from "./pages/RFQPage";
+import SuppliersPage from "./pages/SuppliersPage";
 
 function App() {
   return (
@@ -45,7 +46,8 @@ function App() {
             <Route path="/rfq" element={<RFQPage />} />
             <Route path="/rfq/:rfqId" element={<RFQPage />} />
             <Route path="/orders/:id" element={<DashboardPage />} />
-            <Route path="/suppliers" element={<ProductsPage />} />
+            <Route path="/suppliers" element={<SuppliersPage />} />
+            <Route path="/suppliers/:supplierId" element={<SuppliersPage />} />
             <Route path="/blog" element={<HomePage />} />
           </Routes>
         </BrowserRouter>
