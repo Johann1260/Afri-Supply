@@ -52,7 +52,7 @@ export const Footer = () => {
           <div className="lg:col-span-2">
             <Link to="/" className="flex items-center gap-3 mb-6">
               <img 
-                src="https://customer-assets.emergentagent.com/job_supply-connect-40/artifacts/pxemorud_IMG_8426.png" 
+                src="../logo.png" 
                 alt="AfriSupply"
                 className="h-12 w-auto"
               />

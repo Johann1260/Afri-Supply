@@ -95,7 +95,7 @@ export const Header = () => {
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2" data-testid="logo-link">
             <img 
-              src="https://customer-assets.emergentagent.com/job_supply-connect-40/artifacts/pxemorud_IMG_8426.png" 
+              src="../logo.png" 
               alt="AfriSupply"
               className="h-10 w-auto"
             />

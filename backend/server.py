@@ -1804,8 +1804,8 @@ async def health():
 async def seed_data():
     """Seed initial categories and sample data"""
     
-    # Check if already seeded
-    existing = await db.categories.count_documents({})
+    # Check if already seeded — on vérifie les PRODUITS au lieu des catégories
+    existing = await db.products.count_documents({})
     if existing > 0:
         return {"message": "Data already seeded"}
     
@@ -1858,6 +1858,7 @@ async def seed_data():
         "viewed_products": []
     }
     await db.users.insert_one(supplier)
+    print("Supplier inséré avec succès")
     
     # Create sample buyer
     buyer_id = str(uuid.uuid4())
@@ -1876,6 +1877,7 @@ async def seed_data():
         "viewed_products": []
     }
     await db.users.insert_one(buyer)
+    print("Buyer inséré avec succès")
     
     # Create sample products
     products = [
@@ -1996,6 +1998,7 @@ async def seed_data():
     ]
     
     await db.products.insert_many(products)
+    print("Produits insérés :", len(products))
     
     # Create sample blog post
     blog_post = {
@@ -2015,6 +2018,7 @@ async def seed_data():
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.blog_posts.insert_one(blog_post)
+    print("Blog post inséré")
     
     return {"message": "Data seeded successfully", "categories": len(categories), "products": len(products)}
 
