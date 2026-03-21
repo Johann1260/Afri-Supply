@@ -13,7 +13,8 @@ from datetime import datetime, timezone, timedelta
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 import json
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+from openai import OpenAI  # Remplace emergentintegrations.llm.chat
+import stripe  # Pour les paiements
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -568,35 +569,33 @@ async def get_recommendations(current_user: dict = Depends(get_current_user)):
         viewed = current_user.get("viewed_products", [])[-10:]
         favorites = current_user.get("favorites", [])
         
-        # Get user's viewed and favorite products for context
         context_products = []
         for pid in (viewed + favorites)[:5]:
-            product = await db.products.find_one({"id": pid}, {"_id": 0, "name": 1, "category_id": 1})
+            product = await db.products.find_one({"id": pid}, {"_id": 0, "name": 1})
             if product:
                 context_products.append(product.get("name", ""))
         
-        # Use AI to generate recommendations
-        api_key = os.environ.get("EMERGENT_LLM_KEY")
+        api_key = os.environ.get("EMERGENT_LLM_KEY")  # Renommez en OPENAI_API_KEY si nécessaire
         if api_key and context_products:
-            chat = LlmChat(
-                api_key=api_key,
-                session_id=f"rec_{current_user['id']}",
-                system_message="You are a B2B product recommendation assistant for an industrial marketplace in Central Africa. Respond only with category IDs."
-            ).with_model("openai", "gpt-5.2")
-            
+            client = OpenAI(api_key=api_key)
             categories = await db.categories.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(10)
             cat_list = ", ".join([f"{c['id']}:{c['name']}" for c in categories])
             
-            user_msg = UserMessage(text=f"User viewed: {', '.join(context_products)}. Categories: {cat_list}. Return 2 most relevant category IDs separated by comma.")
-            response = await chat.send_message(user_msg)
+            user_msg = f"User viewed: {', '.join(context_products)}. Categories: {cat_list}. Return 2 most relevant category IDs separated by comma."
+            response = client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are a B2B product recommendation assistant for an industrial marketplace in Central Africa. Respond only with category IDs."},
+                    {"role": "user", "content": user_msg}
+                ]
+            )
             
-            rec_cat_ids = [cid.strip() for cid in response.split(",")][:2]
+            rec_cat_ids = [cid.strip() for cid in response.choices[0].message.content.split(",")][:2]
             products = await db.products.find(
                 {"category_id": {"$in": rec_cat_ids}, "is_available": True},
                 {"_id": 0}
             ).limit(8).to_list(8)
         else:
-            # Fallback to popular products
             products = await db.products.find({"is_available": True}, {"_id": 0}).sort("rating", -1).limit(8).to_list(8)
         
         for product in products:
@@ -898,100 +897,81 @@ async def update_order_status(order_id: str, status: str, current_user: dict = D
 
 @api_router.post("/checkout/session")
 async def create_checkout_session(request: CheckoutRequest, http_request: Request, current_user: dict = Depends(get_current_user)):
-    from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
-    
     cart = await db.carts.find_one({"user_id": current_user["id"]}, {"_id": 0})
     if not cart or not cart.get("items"):
         raise HTTPException(status_code=400, detail="Cart is empty")
     
-    # Calculate total
     total = 0.0
     for item in cart["items"]:
         product = await db.products.find_one({"id": item["product_id"]}, {"_id": 0})
-        if product:
-            total += product["price"] * item["quantity"]
+        total += product["price"] * item["quantity"]
     
-    # Convert XAF to USD (approximate rate)
-    total_usd = round(total / 600, 2)
+    total_usd = round(total / 600, 2)  # Conversion XAF to USD
     
-    api_key = os.environ.get("STRIPE_API_KEY")
+    stripe.api_key = os.environ.get("STRIPE_API_KEY")
     host_url = str(http_request.base_url).rstrip("/")
-    webhook_url = f"{host_url}/api/webhook/stripe"
-    
-    stripe_checkout = StripeCheckout(api_key=api_key, webhook_url=webhook_url)
-    
-    success_url = f"{request.origin_url}/checkout/success?session_id={{CHECKOUT_SESSION_ID}}"
-    cancel_url = f"{request.origin_url}/checkout/cancel"
-    
-    checkout_request = CheckoutSessionRequest(
-        amount=total_usd,
-        currency="usd",
-        success_url=success_url,
-        cancel_url=cancel_url,
+    session = stripe.checkout.Session.create(
+        payment_method_types=["card"],
+        line_items=[{
+            "price_data": {
+                "currency": "usd",
+                "product_data": {"name": "AfriSupply Order"},
+                "unit_amount": int(total_usd * 100),
+            },
+            "quantity": 1,
+        }],
+        mode="payment",
+        success_url=f"{request.origin_url}/checkout/success?session_id={{CHECKOUT_SESSION_ID}}",
+        cancel_url=f"{request.origin_url}/checkout/cancel",
         metadata={"user_id": current_user["id"], "cart_total_xaf": str(total)}
     )
     
-    session = await stripe_checkout.create_checkout_session(checkout_request)
-    
-    # Record payment transaction
     await db.payment_transactions.insert_one({
         "id": str(uuid.uuid4()),
-        "session_id": session.session_id,
+        "session_id": session.id,
         "user_id": current_user["id"],
         "amount_usd": total_usd,
         "amount_xaf": total,
-        "currency": "usd",
         "status": "initiated",
-        "payment_status": "pending",
         "created_at": datetime.now(timezone.utc).isoformat()
     })
     
-    return {"url": session.url, "session_id": session.session_id}
+    return {"url": session.url, "session_id": session.id}
 
 @api_router.get("/checkout/status/{session_id}", response_model=PaymentStatusResponse)
 async def get_checkout_status(session_id: str, current_user: dict = Depends(get_current_user)):
-    from emergentintegrations.payments.stripe.checkout import StripeCheckout
-    
-    api_key = os.environ.get("STRIPE_API_KEY")
-    stripe_checkout = StripeCheckout(api_key=api_key, webhook_url="")
-    
-    status = await stripe_checkout.get_checkout_status(session_id)
-    
-    # Update transaction record
-    if status.payment_status == "paid":
+    stripe.api_key = os.environ.get("STRIPE_API_KEY")
+    session = stripe.checkout.Session.retrieve(session_id, expand=["payment_intent"])
+    payment_status = session.payment_status or session.status
+    if payment_status == "paid":
         await db.payment_transactions.update_one(
             {"session_id": session_id},
             {"$set": {"status": "completed", "payment_status": "paid"}}
         )
-    
-    return PaymentStatusResponse(
-        status=status.status,
-        payment_status=status.payment_status
-    )
+    return PaymentStatusResponse(status=session.status, payment_status=payment_status, order_id=None)
 
 @api_router.post("/webhook/stripe")
 async def stripe_webhook(request: Request):
-    from emergentintegrations.payments.stripe.checkout import StripeCheckout
-    
-    api_key = os.environ.get("STRIPE_API_KEY")
-    stripe_checkout = StripeCheckout(api_key=api_key, webhook_url="")
-    
-    body = await request.body()
-    signature = request.headers.get("Stripe-Signature")
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature")
+    endpoint_secret = os.environ.get("STRIPE_WEBHOOK_SECRET")
     
     try:
-        webhook_response = await stripe_checkout.handle_webhook(body, signature)
-        
-        if webhook_response.payment_status == "paid":
-            await db.payment_transactions.update_one(
-                {"session_id": webhook_response.session_id},
-                {"$set": {"status": "completed", "payment_status": "paid"}}
-            )
-        
-        return {"status": "success"}
-    except Exception as e:
-        logger.error(f"Webhook error: {e}")
-        return {"status": "error"}
+        event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid payload")
+    except stripe.error.SignatureVerificationError:
+        raise HTTPException(status_code=400, detail="Invalid signature")
+    
+    if event["type"] == "checkout.session.completed":
+        session = event["data"]["object"]
+        await db.payment_transactions.update_one(
+            {"session_id": session.id},
+            {"$set": {"status": "paid", "payment_status": "paid"}}
+        )
+        # Traiter la commande ici (ex. : créer des ordres)
+    
+    return {"status": "success"}
 
 # ======================= REVIEWS ENDPOINTS =======================
 
