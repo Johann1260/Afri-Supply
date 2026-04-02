@@ -1,124 +1,138 @@
-aiohappyeyeballs  
-aiohttp  
-aiosignal  
-annotated-doc  
-annotated-types  
-anyio  
-attrs  
-bcrypt  
-black  
-boto3  
-botocore  
-certifi  
-cffi  
-charset-normalizer  
-click  
-cryptography  
-distro  
-dnspython  
-ecdsa  
-email-validator  
-fastapi  
-fastuuid  
-filelock  
-flake8  
-frozenlist  
-fsspec  
-google-ai-generativelanguage  
-google-api-core  
-google-api-python-client  
-google-auth  
-google-auth-httplib2  
-google-genai  
-google-generativeai  
-googleapis-common-protos  
-grpcio  
-grpcio-status  
-h11  
-hf-xet  
-httpcore  
-httplib2  
-httpx  
-huggingface_hub  
-idna  
-importlib_metadata  
-iniconfig  
-isort  
-Jinja2  
-jiter  
-jmespath  
-jq  
-jsonschema  
-jsonschema-specifications  
-librt  
-litellm  
-markdown-it-py  
-MarkupSafe  
-mccabe  
-mdurl  
-motor  
-multidict  
-mypy  
-mypy_extensions  
-numpy  
-oauthlib  
-openai  
-packaging  
-pandas  
-passlib  
-pathspec  
-pillow  
-platformdirs  
-pluggy  
-proto-plus  
-protobuf  
-pyasn1  
-pyasn1_modules  
-pycodestyle  
-pycparser  
-pydantic  
-pydantic_core  
-pyflakes  
-Pygments  
-PyJWT  
-pymongo  
-pyparsing  
-pytest  
-python-dateutil  
-python-dotenv  
-python-http-client  
-python-jose  
-python-multipart  
-pytokens  
-PyYAML  
-referencing  
-regex  
-requests  
-requests-oauthlib  
-rich  
-rpds-py  
-rsa  
-s3transfer  
-s5cmd  
-sendgrid  
-shellingham  
-six  
-sniffio  
-starlette  
-stripe  
-tenacity  
-tiktoken  
-tokenizers  
-tqdm  
-typer  
-typing-inspection  
-typing_extensions  
-tzdata  
-uritemplate  
-urllib3  
-uvicorn  
-watchfiles  
-websockets  
-Werkzeug  
-yarl  
-zipp
+# aiohappyeyeballs  
+# aiohttp  
+# aiosignal  
+# annotated-doc  
+# annotated-types  
+# anyio  
+# attrs  
+# bcrypt  
+# black  
+# boto3  
+# botocore  
+# certifi  
+# cffi  
+# charset-normalizer  
+# click  
+# cryptography  
+# distro  
+# dnspython  
+# ecdsa  
+# email-validator  
+# fastapi  
+# fastuuid  
+# filelock  
+# flake8  
+# frozenlist  
+# fsspec  
+# google-ai-generativelanguage  
+# google-api-core  
+# google-api-python-client  
+# google-auth  
+# google-auth-httplib2  
+# google-genai  
+# google-generativeai  
+# googleapis-common-protos  
+# grpcio  
+# grpcio-status  
+# h11  
+# hf-xet  
+# httpcore  
+# httplib2  
+# httpx  
+# huggingface_hub  
+# idna  
+# importlib_metadata  
+# iniconfig  
+# isort  
+# Jinja2  
+# jiter  
+# jmespath  
+# jq  
+# jsonschema  
+# jsonschema-specifications  
+# librt  
+# litellm  
+# markdown-it-py  
+# MarkupSafe  
+# mccabe  
+# mdurl  
+# motor  
+# multidict  
+# mypy  
+# mypy_extensions  
+# numpy  
+# oauthlib  
+# openai  
+# packaging  
+# pandas  
+# passlib  
+# pathspec  
+# pillow  
+# platformdirs  
+# pluggy  
+# proto-plus  
+# protobuf  
+# pyasn1  
+# pyasn1_modules  
+# pycodestyle  
+# pycparser  
+# pydantic  
+# pydantic_core  
+# pyflakes  
+# Pygments  
+# PyJWT  
+# pymongo  
+# pyparsing  
+# pytest  
+# python-dateutil  
+# python-dotenv  
+# python-http-client  
+# python-jose  
+# python-multipart  
+# pytokens  
+# PyYAML  
+# referencing  
+# regex  
+# requests  
+# requests-oauthlib  
+# rich  
+# rpds-py  
+# rsa  
+# s3transfer  
+# s5cmd  
+# sendgrid  
+# shellingham  
+# six  
+# sniffio  
+# starlette  
+# stripe  
+# tenacity  
+# tiktoken  
+# tokenizers  
+# tqdm  
+# typer  
+# typing-inspection  
+# typing_extensions  
+# tzdata  
+# uritemplate  
+# urllib3  
+# uvicorn  
+# watchfiles  
+# websockets  
+# Werkzeug  
+# yarl  
+# zipp
+
+fastapi==0.101.0
+uvicorn==0.25.0
+pydantic==2.3.0
+python-dotenv==1.0.0
+motor==4.3.1
+passlib[bcrypt]==1.7.4
+python-jose==3.3.0
+python-multipart==0.0.6
+openai==1.0.0
+stripe==6.0.0
+requests==2.31.0
+httpx==0.26.2
+starlette==0.27.0
