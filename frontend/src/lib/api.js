@@ -4,59 +4,103 @@ const API_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
 
 const api = axios.create({
   baseURL: `${API_URL}/api`,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  headers: { 'Content-Type': 'application/json' },
 });
 
-// Request interceptor for auth token
+// Request interceptor
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem('access_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
 });
 
-// Response interceptor for error handling
+// Response interceptor - Refresh amélioré
+// Response interceptor - Version simplifiée et robuste
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
+  async (error) => {
+    const originalRequest = error.config;
+
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true;
+
+      const refreshToken = localStorage.getItem('refresh_token');
+
+      if (!refreshToken) {
+        localStorage.clear();
+        window.location.href = '/login?expired=true';
+        return Promise.reject(error);
+      }
+
+      try {
+        const res = await axios.post(`${API_URL}/api/auth/refresh`, {}, {
+          headers: { Authorization: `Bearer ${refreshToken}` }
+        });
+
+        const { access_token, refresh_token } = res.data;
+
+        localStorage.setItem('access_token', access_token);
+        localStorage.setItem('refresh_token', refresh_token);
+
+        originalRequest.headers.Authorization = `Bearer ${access_token}`;
+        return api(originalRequest);
+      } catch (refreshError) {
+        console.error('Refresh failed');
+        localStorage.clear();
+        window.location.href = '/login?expired=true';
+        return Promise.reject(refreshError);
+      }
     }
+
     return Promise.reject(error);
   }
 );
-
 // Auth
 export const authAPI = {
-  register: (data) => api.post('/auth/register', data),
-  login: (data) => api.post('/auth/login', data),
-  getMe: () => api.get('/auth/me'),
-};
+  login: async (data) => {
+    const response = await api.post('/auth/login', data);
+    const { access_token, refresh_token, user } = response.data;
 
-// Categories
+    localStorage.setItem('access_token', access_token);
+    localStorage.setItem('refresh_token', refresh_token);
+    localStorage.setItem('user', JSON.stringify(user));
+
+    return response;
+  },
+
+  register: (data) => api.post('/auth/register', data),
+};
+// Les autres APIs restent identiques
 export const categoriesAPI = {
   getAll: () => api.get('/categories'),
   create: (data) => api.post('/categories', data),
 };
 
-// Products
 export const productsAPI = {
   getAll: (params) => api.get('/products', { params }),
   getPopular: (limit = 8) => api.get('/products/popular', { params: { limit } }),
   getRecommendations: () => api.get('/products/recommendations'),
   getById: (id) => api.get(`/products/${id}`),
-  create: (data) => api.post('/products', data),
+  
+  // Création avec support upload images (FormData)
+  create: (data) => {
+    if (data instanceof FormData) {
+      return api.post('/products', data, {
+        headers: { 'Content-Type': 'multipart/form-data' }, // Important
+      });
+    }
+    return api.post('/products', data);
+  },
+
   update: (id, data) => api.put(`/products/${id}`, data),
   delete: (id) => api.delete(`/products/${id}`),
+  
+  // Pour le dashboard supplier
   getSupplierProducts: () => api.get('/supplier/products'),
 };
 
-// Cart
 export const cartAPI = {
   get: () => api.get('/cart'),
   addItem: (productId, quantity) => api.post('/cart/items', { product_id: productId, quantity }),
@@ -65,7 +109,6 @@ export const cartAPI = {
   clear: () => api.delete('/cart'),
 };
 
-// Orders
 export const ordersAPI = {
   create: (data) => api.post('/orders', data),
   getAll: () => api.get('/orders'),
@@ -73,40 +116,34 @@ export const ordersAPI = {
   updateStatus: (id, status) => api.put(`/orders/${id}/status`, null, { params: { status } }),
 };
 
-// Payment
 export const paymentAPI = {
   createCheckoutSession: (originUrl) => api.post('/checkout/session', { origin_url: originUrl }),
   getCheckoutStatus: (sessionId) => api.get(`/checkout/status/${sessionId}`),
 };
 
-// Reviews
 export const reviewsAPI = {
   create: (data) => api.post('/reviews', data),
   getByProduct: (productId) => api.get(`/products/${productId}/reviews`),
 };
 
-// Favorites
 export const favoritesAPI = {
   getAll: () => api.get('/favorites'),
   add: (productId) => api.post(`/favorites/${productId}`),
   remove: (productId) => api.delete(`/favorites/${productId}`),
 };
 
-// Messages
 export const messagesAPI = {
   send: (data) => api.post('/messages', data),
   getConversations: () => api.get('/messages/conversations'),
   getMessages: (partnerId) => api.get(`/messages/${partnerId}`),
 };
 
-// Blog
 export const blogAPI = {
   getAll: (params) => api.get('/blog', { params }),
   getById: (id) => api.get(`/blog/${id}`),
   create: (data) => api.post('/blog', data),
 };
 
-// Supplier Stats
 export const supplierAPI = {
   getStats: () => api.get('/supplier/stats'),
   getAll: (params) => api.get('/suppliers', { params }),
@@ -115,7 +152,6 @@ export const supplierAPI = {
   rateSupplier: (id, data) => api.post(`/suppliers/${id}/rate`, data),
 };
 
-// RFQ
 export const rfqAPI = {
   getAll: () => api.get('/rfq'),
   getById: (id) => api.get(`/rfq/${id}`),
@@ -125,7 +161,6 @@ export const rfqAPI = {
   rejectQuote: (id) => api.post(`/rfq/${id}/reject`),
 };
 
-// Notifications
 export const notificationsAPI = {
   getAll: () => api.get('/notifications'),
   getUnreadCount: () => api.get('/notifications/unread-count'),
@@ -133,13 +168,11 @@ export const notificationsAPI = {
   markAllAsRead: () => api.post('/notifications/read-all'),
 };
 
-// Mobile Money
 export const mobileMoneyAPI = {
   createPayment: (data) => api.post('/checkout/mobile-money', data),
   confirmPayment: (transactionId) => api.post(`/checkout/mobile-money/${transactionId}/confirm`),
 };
 
-// Seed Data
 export const seedAPI = {
   seed: () => api.post('/seed'),
 };

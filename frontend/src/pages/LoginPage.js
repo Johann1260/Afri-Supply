@@ -24,12 +24,19 @@ const LoginPage = () => {
     setLoading(true);
 
     try {
-      const user = await login(formData.email, formData.password);
+      const user = await login(formData);
       toast.success(`Bienvenue ${user.full_name}!`);
       navigate('/dashboard');
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Identifiants incorrects');
-    } finally {
+      const message =
+      error.response?.data?.detail?.[0]?.msg ||
+      error.response?.data?.detail ||
+      error.message ||
+      "Identifiants incorrects";
+
+      toast.error(message);
+    }
+    finally {
       setLoading(false);
     }
   };
@@ -70,7 +77,7 @@ const LoginPage = () => {
             </p>
 
             {/* Demo accounts */}
-            <div className="mb-6 p-4 bg-slate-50 rounded-lg">
+            {/* <div className="mb-6 p-4 bg-slate-50 rounded-lg">
               <p className="text-sm text-slate-600 mb-3">Comptes de démonstration:</p>
               <div className="flex gap-2">
                 <Button 
@@ -96,7 +103,7 @@ const LoginPage = () => {
                   Fournisseur
                 </Button>
               </div>
-            </div>
+            </div> */}
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>

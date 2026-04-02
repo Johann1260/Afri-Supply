@@ -25,31 +25,41 @@ import {
 } from '../ui/dropdown-menu';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
-import api from '../../lib/api';
+import { notificationsAPI } from '../../lib/api';
 
 export const Header = () => {
   const { user, isAuthenticated, logout } = useAuth();
   const { cart } = useCart();
   const navigate = useNavigate();
   const location = useLocation();
+
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
 
+  // Fetch unread notifications count
   useEffect(() => {
-    if (isAuthenticated) {
-      fetchUnreadCount();
+    if (!isAuthenticated) {
+      setUnreadCount(0);
+      return;
     }
-  }, [isAuthenticated]);
 
-  const fetchUnreadCount = async () => {
-    try {
-      const res = await api.get('/notifications/unread-count');
-      setUnreadCount(res.data.unread_count);
-    } catch (error) {
-      console.error('Failed to fetch unread count:', error);
-    }
-  };
+    const fetchUnreadCount = async () => {
+      try {
+        const res = await notificationsAPI.getUnreadCount();
+        setUnreadCount(res.data.unread_count || 0);
+      } catch (error) {
+        console.error('Failed to fetch unread count:', error);
+      }
+    };
+
+    fetchUnreadCount();
+
+    // Rafraîchissement automatique toutes les 25 secondes
+    const interval = setInterval(fetchUnreadCount, 25000);
+
+    return () => clearInterval(interval);
+  }, [isAuthenticated]);
 
   const handleSearch = (e) => {
     e.preventDefault();
@@ -95,7 +105,7 @@ export const Header = () => {
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2" data-testid="logo-link">
             <img 
-              src="../logo.png" 
+              src="/logo.png" 
               alt="AfriSupply"
               className="h-10 w-auto"
             />
@@ -138,7 +148,7 @@ export const Header = () => {
               )}
             </Link>
 
-            {/* Notifications */}
+            {/* Notifications avec badge */}
             {isAuthenticated && (
               <Link
                 to="/notifications"
@@ -147,8 +157,8 @@ export const Header = () => {
               >
                 <Bell className="w-6 h-6" weight="bold" />
                 {unreadCount > 0 && (
-                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
-                    {unreadCount}
+                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full shadow">
+                    {unreadCount > 99 ? '99+' : unreadCount}
                   </span>
                 )}
               </Link>

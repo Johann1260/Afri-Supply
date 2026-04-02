@@ -129,7 +129,7 @@ const ProductDetailPage = () => {
     }
   };
 
-  const handleSubmitRFQ = async () => {
+    const handleSubmitRFQ = async () => {
     if (!isAuthenticated) {
       toast.error('Veuillez vous connecter');
       navigate('/login');
@@ -137,7 +137,7 @@ const ProductDetailPage = () => {
     }
 
     if (!rfqData.quantity || !rfqData.delivery_location) {
-      toast.error('Veuillez remplir les champs obligatoires');
+      toast.error('Quantité et lieu de livraison sont obligatoires');
       return;
     }
 
@@ -152,11 +152,23 @@ const ProductDetailPage = () => {
         specifications: rfqData.specifications || null,
         notes: rfqData.notes || null
       });
-      toast.success('Demande de devis envoyée');
+
+      toast.success('Demande de devis envoyée avec succès !');
       setRfqDialogOpen(false);
-      setRfqData({ quantity: '', target_price: '', delivery_location: '', delivery_deadline: '', specifications: '', notes: '' });
+      
+      // Reset form
+      setRfqData({
+        quantity: '',
+        target_price: '',
+        delivery_location: '',
+        delivery_deadline: '',
+        specifications: '',
+        notes: ''
+      });
     } catch (error) {
-      toast.error('Erreur lors de l\'envoi de la demande');
+      console.error(error);
+      const msg = error.response?.data?.detail?.[0]?.msg || 'Erreur lors de l\'envoi';
+      toast.error(msg);
     }
   };
 
@@ -398,93 +410,100 @@ const ProductDetailPage = () => {
             </div>
 
             {/* RFQ Button */}
+                        {/* RFQ Button & Modal */}
             <Dialog open={rfqDialogOpen} onOpenChange={setRfqDialogOpen}>
               <DialogTrigger asChild>
                 <Button
                   size="lg"
                   variant="outline"
-                  className="w-full mb-8 border-primary text-primary hover:bg-primary/5"
+                  className="w-full mb-8 border-accent text-accent hover:bg-accent/5 font-medium"
                   data-testid="request-quote-btn"
                 >
                   <FileText className="w-5 h-5 mr-2" />
                   Demander un devis personnalisé
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-lg">
+
+              <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
-                  <DialogTitle>Demande de Devis (RFQ)</DialogTitle>
+                  <DialogTitle>Demande de Devis pour {product.name}</DialogTitle>
                   <DialogDescription>
-                    Demandez un devis personnalisé pour {product.name}
+                    Remplissez les informations ci-dessous pour recevoir un devis personnalisé du fournisseur.
                   </DialogDescription>
                 </DialogHeader>
-                <div className="space-y-4 pt-4 max-h-[60vh] overflow-y-auto">
+
+                <div className="space-y-5 py-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <Label>Quantité souhaitée *</Label>
                       <Input
                         type="number"
+                        min={product.min_order_quantity || 1}
                         value={rfqData.quantity}
                         onChange={(e) => setRfqData({ ...rfqData, quantity: e.target.value })}
-                        placeholder={`Min. ${product.min_order_quantity}`}
-                        data-testid="rfq-quantity"
+                        placeholder={`Minimum ${product.min_order_quantity}`}
                       />
                     </div>
                     <div>
-                      <Label>Prix cible (XAF)</Label>
+                      <Label>Prix cible (XAF) - optionnel</Label>
                       <Input
                         type="number"
                         value={rfqData.target_price}
                         onChange={(e) => setRfqData({ ...rfqData, target_price: e.target.value })}
-                        placeholder="Optionnel"
+                        placeholder="Votre budget"
                       />
                     </div>
                   </div>
+
                   <div>
                     <Label>Lieu de livraison *</Label>
                     <Input
                       value={rfqData.delivery_location}
                       onChange={(e) => setRfqData({ ...rfqData, delivery_location: e.target.value })}
-                      placeholder="Ville, Pays"
-                      data-testid="rfq-location"
+                      placeholder="Ex: Douala, Cameroun"
                     />
                   </div>
+
                   <div>
-                    <Label>Date limite de livraison</Label>
+                    <Label>Date limite souhaitée</Label>
                     <Input
                       type="date"
                       value={rfqData.delivery_deadline}
                       onChange={(e) => setRfqData({ ...rfqData, delivery_deadline: e.target.value })}
                     />
                   </div>
+
                   <div>
-                    <Label>Spécifications particulières</Label>
+                    <Label>Spécifications / Exigences</Label>
                     <Textarea
                       value={rfqData.specifications}
                       onChange={(e) => setRfqData({ ...rfqData, specifications: e.target.value })}
-                      placeholder="Dimensions, couleur, certifications..."
-                      rows={2}
+                      placeholder="Dimensions, matière, norme requise, etc."
+                      rows={3}
                     />
                   </div>
+
                   <div>
                     <Label>Notes supplémentaires</Label>
                     <Textarea
                       value={rfqData.notes}
                       onChange={(e) => setRfqData({ ...rfqData, notes: e.target.value })}
-                      placeholder="Conditions de paiement, remarques..."
+                      placeholder="Autres conditions..."
                       rows={2}
                     />
                   </div>
+
                   <Button 
-                    className="w-full bg-accent hover:bg-accent-hover"
                     onClick={handleSubmitRFQ}
-                    data-testid="submit-rfq"
+                    className="w-full bg-accent hover:bg-accent-hover"
+                    size="lg"
                   >
                     Envoyer la demande de devis
                   </Button>
                 </div>
               </DialogContent>
             </Dialog>
-
+            
             {/* Benefits */}
             <div className="grid grid-cols-3 gap-4 pt-6 border-t border-slate-200">
               <div className="text-center">

@@ -18,8 +18,10 @@ import {
   SelectValue 
 } from '../components/ui/select';
 import { Slider } from '../components/ui/slider';
+import { Pagination } from '../components/ui/pagination';
 import { productsAPI, categoriesAPI } from '../lib/api';
 import { formatPrice } from '../lib/utils';
+import { toast } from 'sonner';
 
 const ProductsPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -35,11 +37,19 @@ const ProductsPage = () => {
   const [sortBy, setSortBy] = useState('created_at');
   const [sortOrder, setSortOrder] = useState('desc');
 
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 3;
+
+  const isRfqMode = searchParams.get('rfq') === 'true';
+  const [selectedForRfq, setSelectedForRfq] = useState([]);
+
+  // Charger catégories
   useEffect(() => {
     const fetchCategories = async () => {
       try {
         const res = await categoriesAPI.getAll();
-        setCategories(res.data);
+        setCategories(res.data || []);
       } catch (error) {
         console.error('Failed to fetch categories:', error);
       }
@@ -47,6 +57,7 @@ const ProductsPage = () => {
     fetchCategories();
   }, []);
 
+  // Charger produits avec pagination
   useEffect(() => {
     const fetchProducts = async () => {
       setLoading(true);
@@ -58,29 +69,29 @@ const ProductsPage = () => {
           max_price: priceRange[1] < 10000000 ? priceRange[1] : undefined,
           sort_by: sortBy,
           sort_order: sortOrder,
-          limit: 24,
+          skip: (currentPage - 1) * itemsPerPage,
+          limit: itemsPerPage,
         };
         
         const res = await productsAPI.getAll(params);
-        setProducts(res.data);
+        setProducts(res.data || []);
       } catch (error) {
         console.error('Failed to fetch products:', error);
+        setProducts([]);
       } finally {
         setLoading(false);
       }
     };
 
     fetchProducts();
-  }, [search, categoryId, priceRange, sortBy, sortOrder]);
+  }, [search, categoryId, priceRange, sortBy, sortOrder, currentPage]);
 
   const handleSearch = (e) => {
     e.preventDefault();
+    setCurrentPage(1);
     setSearchParams(prev => {
-      if (search) {
-        prev.set('search', search);
-      } else {
-        prev.delete('search');
-      }
+      if (search) prev.set('search', search);
+      else prev.delete('search');
       return prev;
     });
   };
@@ -91,7 +102,13 @@ const ProductsPage = () => {
     setPriceRange([0, 10000000]);
     setSortBy('created_at');
     setSortOrder('desc');
+    setCurrentPage(1);
     setSearchParams({});
+  };
+
+  const handlePageChange = (page) => {
+    setCurrentPage(page);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const activeFiltersCount = [
@@ -99,6 +116,33 @@ const ProductsPage = () => {
     categoryId,
     priceRange[0] > 0 || priceRange[1] < 10000000,
   ].filter(Boolean).length;
+
+  const toggleProductForRfq = (product) => {
+    setSelectedForRfq(prev => {
+      const exists = prev.findIndex(item => item.product_id === product.id);
+      if (exists !== -1) {
+        return prev.filter(item => item.product_id !== product.id);
+      } else {
+        return [...prev, {
+          product_id: product.id,
+          product_name: product.name,
+          quantity: product.min_order_quantity || 1,
+          price: product.price
+        }];
+      }
+    });
+  };
+
+  const handleFinishRfqSelection = () => {
+    if (selectedForRfq.length === 0) {
+      toast.error("Sélectionnez au moins un produit");
+      return;
+    }
+    navigate('/rfq', { state: { selectedProducts: selectedForRfq } });
+  };
+
+  // Calcul pagination
+  const totalPages = Math.ceil(products.length / itemsPerPage) || 1;
 
   return (
     <Layout>
@@ -127,18 +171,18 @@ const ProductsPage = () => {
                 : 'Tous les produits'}
             </h1>
             <p className="text-slate-500 mt-1">
-              {products.length} produit{products.length > 1 ? 's' : ''} trouvé{products.length > 1 ? 's' : ''}
+              {products.length} produit{products.length > 1 ? 's' : ''} affiché{products.length > 1 ? 's' : ''}
             </p>
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Sort */}
             <Select value={`${sortBy}-${sortOrder}`} onValueChange={(val) => {
               const [by, order] = val.split('-');
               setSortBy(by);
               setSortOrder(order);
+              setCurrentPage(1);
             }}>
-              <SelectTrigger className="w-[180px]" data-testid="sort-select">
+              <SelectTrigger className="w-[180px]">
                 <SortAscending className="w-4 h-4 mr-2" />
                 <SelectValue placeholder="Trier par" />
               </SelectTrigger>
@@ -146,24 +190,16 @@ const ProductsPage = () => {
                 <SelectItem value="created_at-desc">Plus récents</SelectItem>
                 <SelectItem value="price-asc">Prix croissant</SelectItem>
                 <SelectItem value="price-desc">Prix décroissant</SelectItem>
-                <SelectItem value="rating-desc">Mieux notés</SelectItem>
               </SelectContent>
             </Select>
 
-            {/* Filter toggle (mobile) */}
             <Button 
               variant="outline" 
               className="lg:hidden"
               onClick={() => setShowFilters(!showFilters)}
-              data-testid="filter-toggle"
             >
               <Funnel className="w-4 h-4 mr-2" />
               Filtres
-              {activeFiltersCount > 0 && (
-                <span className="ml-2 w-5 h-5 bg-accent text-white text-xs rounded-full flex items-center justify-center">
-                  {activeFiltersCount}
-                </span>
-              )}
             </Button>
           </div>
         </div>
@@ -178,7 +214,6 @@ const ProductsPage = () => {
                   <button 
                     onClick={clearFilters}
                     className="text-sm text-accent hover:underline"
-                    data-testid="clear-filters"
                   >
                     Effacer tout
                   </button>
@@ -197,7 +232,6 @@ const ProductsPage = () => {
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     className="pr-10"
-                    data-testid="search-filter-input"
                   />
                   <button 
                     type="submit"
@@ -213,8 +247,11 @@ const ProductsPage = () => {
                 <label className="text-sm font-semibold text-slate-700 mb-2 block">
                   Catégorie
                 </label>
-                <Select value={categoryId || "all"} onValueChange={(value) => setCategoryId(value === "all" ? "" : value)}>
-                  <SelectTrigger data-testid="category-filter">
+                <Select 
+                  value={categoryId || "all"} 
+                  onValueChange={(value) => setCategoryId(value === "all" ? "" : value)}
+                >
+                  <SelectTrigger>
                     <SelectValue placeholder="Toutes les catégories" />
                   </SelectTrigger>
                   <SelectContent>
@@ -240,7 +277,6 @@ const ProductsPage = () => {
                   max={10000000}
                   step={50000}
                   className="mb-4"
-                  data-testid="price-slider"
                 />
                 <div className="flex items-center justify-between text-sm text-slate-600">
                   <span>{formatPrice(priceRange[0])}</span>
@@ -248,7 +284,6 @@ const ProductsPage = () => {
                 </div>
               </div>
 
-              {/* Close button (mobile) */}
               <Button 
                 className="w-full lg:hidden mt-4"
                 onClick={() => setShowFilters(false)}
@@ -258,33 +293,60 @@ const ProductsPage = () => {
             </div>
           </aside>
 
-          {/* Products grid */}
+          {/* Products Grid + Pagination */}
           <div className="flex-1">
-            {/* Active filters */}
-            {activeFiltersCount > 0 && (
-              <div className="flex flex-wrap gap-2 mb-6">
-                {search && (
-                  <span className="inline-flex items-center gap-1 px-3 py-1 bg-primary/10 text-primary rounded-full text-sm">
-                    "{search}"
-                    <button onClick={() => setSearch('')}>
-                      <X className="w-4 h-4" />
-                    </button>
-                  </span>
-                )}
-                {categoryId && (
-                  <span className="inline-flex items-center gap-1 px-3 py-1 bg-primary/10 text-primary rounded-full text-sm">
-                    {categories.find(c => c.id === categoryId)?.name}
-                    <button onClick={() => setCategoryId('')}>
-                      <X className="w-4 h-4" />
-                    </button>
-                  </span>
-                )}
+            <ProductGrid products={products} loading={loading} />
+
+            {/* Pagination */}
+            {!loading && totalPages > 1 && (
+              <div className="mt-12 flex justify-center">
+                <Pagination>
+                  <PaginationContent>
+                    <PaginationItem>
+                      <PaginationPrevious 
+                        onClick={() => handlePageChange(currentPage - 1)}
+                        className={currentPage === 1 ? "pointer-events-none opacity-50" : ""}
+                      />
+                    </PaginationItem>
+
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                      <PaginationItem key={page}>
+                        <PaginationLink 
+                          isActive={page === currentPage}
+                          onClick={() => handlePageChange(page)}
+                        >
+                          {page}
+                        </PaginationLink>
+                      </PaginationItem>
+                    ))}
+
+                    <PaginationItem>
+                      <PaginationNext 
+                        onClick={() => handlePageChange(currentPage + 1)}
+                        className={currentPage === totalPages ? "pointer-events-none opacity-50" : ""}
+                      />
+                    </PaginationItem>
+                  </PaginationContent>
+                </Pagination>
               </div>
             )}
-
-            <ProductGrid products={products} loading={loading} />
           </div>
         </div>
+
+        {/* RFQ floating bar */}
+        {isRfqMode && selectedForRfq.length > 0 && (
+          <div className="fixed bottom-6 right-6 bg-white shadow-2xl border border-accent rounded-2xl p-6 z-50 min-w-[320px]">
+            <p className="font-medium mb-3">
+              {selectedForRfq.length} produit{selectedForRfq.length > 1 ? 's' : ''} sélectionné{selectedForRfq.length > 1 ? 's' : ''}
+            </p>
+            <Button 
+              onClick={handleFinishRfqSelection}
+              className="w-full bg-accent hover:bg-accent-hover"
+            >
+              Terminer ma demande de devis
+            </Button>
+          </div>
+        )}
       </div>
     </Layout>
   );

@@ -15,6 +15,14 @@ from jose import JWTError, jwt
 import json
 from openai import OpenAI  # Remplace emergentintegrations.llm.chat
 import stripe  # Pour les paiements
+from fastapi import Form, File, UploadFile
+import shutil
+from uuid import uuid4
+
+
+# Crée le dossier d'upload au démarrage
+UPLOAD_DIR = "uploads/products"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -27,7 +35,9 @@ db = client[os.environ['DB_NAME']]
 # JWT Configuration
 JWT_SECRET = os.environ.get('JWT_SECRET', 'afrisupply_secret_key')
 JWT_ALGORITHM = os.environ.get('JWT_ALGORITHM', 'HS256')
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get('ACCESS_TOKEN_EXPIRE_MINUTES', 1440))
+# ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get('ACCESS_TOKEN_EXPIRE_MINUTES', 1440))
+ACCESS_TOKEN_EXPIRE_MINUTES = 30      # Court pour forcer le refresh
+REFRESH_TOKEN_EXPIRE_DAYS = 7
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -388,6 +398,11 @@ class NotificationResponse(BaseModel):
     created_at: str
 
 # ======================= AUTH HELPERS =======================
+def create_refresh_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
@@ -470,14 +485,51 @@ async def login(credentials: UserLogin):
     if not user or not verify_password(credentials.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     
-    token = create_access_token({"sub": user["id"]})
+    access_token = create_access_token({"sub": user["id"]})
+    refresh_token = create_refresh_token({"sub": user["id"]})
+    
     user_response = UserResponse(
-        id=user["id"], email=user["email"], full_name=user["full_name"],
-        company_name=user.get("company_name"), phone=user.get("phone"),
-        country=user.get("country"), city=user.get("city"),
-        user_type=user["user_type"], created_at=user["created_at"]
+        id=user["id"], 
+        email=user["email"], 
+        full_name=user["full_name"],
+        company_name=user.get("company_name"), 
+        phone=user.get("phone"),
+        country=user.get("country"), 
+        city=user.get("city"),
+        user_type=user["user_type"], 
+        created_at=user["created_at"]
     )
-    return TokenResponse(access_token=token, user=user_response)
+    
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,   # ← AJOUTÉ
+        "token_type": "bearer",
+        "user": user_response
+    }
+
+@api_router.post("/auth/refresh")
+async def refresh_token(refresh_token: str):
+    try:
+        payload = jwt.decode(refresh_token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Invalid refresh token")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Refresh token expired or invalid")
+
+    # Vérifier que l'utilisateur existe toujours
+    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    new_access_token = create_access_token({"sub": user_id})
+    new_refresh_token = create_refresh_token({"sub": user_id})  # rotation
+
+    return {
+        "access_token": new_access_token,
+        "refresh_token": new_refresh_token,
+        "token_type": "bearer"
+    }
 
 @api_router.get("/auth/me", response_model=UserResponse)
 async def get_me(current_user: dict = Depends(get_current_user)):
@@ -505,6 +557,7 @@ async def create_category(category: CategoryCreate, current_user: dict = Depends
     return CategoryResponse(id=cat_id, **category.model_dump())
 
 # ======================= PRODUCTS ENDPOINTS =======================
+
 
 @api_router.get("/products", response_model=List[ProductResponse])
 async def get_products(
@@ -633,37 +686,69 @@ async def get_product(product_id: str, current_user: dict = Depends(get_current_
     return product
 
 @api_router.post("/products", response_model=ProductResponse)
-async def create_product(product: ProductCreate, current_user: dict = Depends(get_current_user)):
+async def create_product(
+    name: str = Form(...),
+    description: Optional[str] = Form(None),
+    price: float = Form(...),
+    unit: str = Form("unité"),
+    min_order_quantity: int = Form(1),
+    stock_quantity: int = Form(0),
+    category_id: str = Form(...),
+    specifications: str = Form("{}"),
+    is_available: bool = Form(True),
+    images: List[UploadFile] = File(default=[]),   # ← Support upload multiple
+    current_user: dict = Depends(get_current_user)
+):
     if current_user["user_type"] != "supplier":
         raise HTTPException(status_code=403, detail="Only suppliers can create products")
-    
+
+    # Sauvegarde des images
+    image_urls = []
+    for image in images:
+        if image and image.content_type and image.content_type.startswith("image/"):
+            ext = image.filename.split('.')[-1].lower()
+            filename = f"{uuid4()}.{ext}"
+            file_path = os.path.join(UPLOAD_DIR, filename)
+            
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(image.file, buffer)
+            
+            image_urls.append(f"/uploads/products/{filename}")
+
+    # Création du document
     product_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
-    
+
     product_doc = {
         "id": product_id,
         "supplier_id": current_user["id"],
+        "supplier_company": current_user.get("company_name"),
+        "name": name,
+        "description": description,
+        "price": price,
+        "unit": unit,
+        "min_order_quantity": min_order_quantity,
+        "stock_quantity": stock_quantity,
+        "category_id": category_id,
+        "specifications": json.loads(specifications) if specifications else {},
+        "is_available": is_available,
+        "images": image_urls,
         "rating": 0.0,
         "review_count": 0,
         "created_at": now,
-        **product.model_dump()
     }
-    
+
     await db.products.insert_one(product_doc)
+
+    # Enrichissement pour la réponse
+    category = await db.categories.find_one({"id": category_id}, {"_id": 0})
     
-    category = await db.categories.find_one({"id": product.category_id}, {"_id": 0})
-    
-    return ProductResponse(
-        id=product_id,
-        supplier_id=current_user["id"],
-        supplier_name=current_user["full_name"],
-        supplier_company=current_user.get("company_name"),
-        category_name=category.get("name") if category else None,
-        rating=0.0,
-        review_count=0,
-        created_at=now,
-        **product.model_dump()
-    )
+    return {
+        **product_doc,
+        "category_name": category.get("name") if category else None,
+        "supplier_name": current_user.get("full_name"),
+        "supplier_company": current_user.get("company_name"),
+    }
 
 @api_router.put("/products/{product_id}", response_model=ProductResponse)
 async def update_product(product_id: str, product: ProductUpdate, current_user: dict = Depends(get_current_user)):
@@ -698,17 +783,36 @@ async def delete_product(product_id: str, current_user: dict = Depends(get_curre
 
 @api_router.get("/supplier/products", response_model=List[ProductResponse])
 async def get_supplier_products(current_user: dict = Depends(get_current_user)):
-    if current_user["user_type"] != "supplier":
+    if current_user.get("user_type") != "supplier":
         raise HTTPException(status_code=403, detail="Only suppliers can access this")
     
-    products = await db.products.find({"supplier_id": current_user["id"]}, {"_id": 0}).to_list(1000)
-    for product in products:
-        category = await db.categories.find_one({"id": product.get("category_id")}, {"_id": 0})
-        product["category_name"] = category.get("name") if category else None
-        product["supplier_name"] = current_user["full_name"]
-        product["supplier_company"] = current_user.get("company_name")
-    return products
+    products = await db.products.find(
+        {"supplier_id": current_user["id"]}, 
+        {"_id": 0}
+    ).to_list(1000)
 
+    result = []
+    for product in products:
+        # Conversion de l'ID en string et nettoyage des champs None
+        product["id"] = str(product.get("id", ""))
+        
+        # Fix principal : description ne doit jamais être None
+        product["description"] = product.get("description") or ""
+
+        # Autres champs optionnels
+        product["supplier_name"] = current_user.get("full_name", "")
+        product["supplier_company"] = current_user.get("company_name", "")
+
+        # Enrichissement catégorie
+        if product.get("category_id"):
+            category = await db.categories.find_one({"id": product["category_id"]}, {"_id": 0})
+            product["category_name"] = category.get("name") if category else None
+        else:
+            product["category_name"] = None
+
+        result.append(product)
+
+    return result
 # ======================= CART ENDPOINTS =======================
 
 @api_router.get("/cart", response_model=CartResponse)
