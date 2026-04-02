@@ -123,16 +123,17 @@
 # yarl  
 # zipp
 
-fastapi==0.101.0
-uvicorn==0.25.0
-pydantic==2.3.0
-python-dotenv==1.0.0
-motor==4.3.1
-passlib[bcrypt]==1.7.4
-python-jose==3.3.0
-python-multipart==0.0.6
-openai==1.0.0
-stripe==6.0.0
-requests==2.31.0
-httpx==0.26.2
-starlette==0.27.0
+fastapi
+uvicorn
+pydantic
+python-dotenv
+motor
+passlib
+bcrypt
+python-jose
+python-multipart
+openai
+stripe
+requests
+httpx
+starlette
