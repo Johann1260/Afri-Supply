@@ -78,6 +78,8 @@ agenthub/agents/youtube/db
 backend/.env
 frontend/.env
 .env
+backend_test
+test_result
 
 # Mobile development
 android-sdk/ frontend/node_modules/.cache/default-development/4.pack
