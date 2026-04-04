@@ -25,13 +25,8 @@ const HomePage = () => {
   useEffect(() => {
   const fetchData = async () => {
     try {
-      // Option 1 : Ne plus appeler seed du tout en prod
       if (process.env.NODE_ENV === 'development') {
-        try {
-          await seedAPI.seed();
-        } catch (e) {
-          // ignore if already seeded
-        }
+        try { await seedAPI.seed(); } catch (e) {}
       }
 
       const [catRes, prodRes] = await Promise.all([
@@ -39,8 +34,8 @@ const HomePage = () => {
         productsAPI.getPopular(8)
       ]);
 
-      setCategories(catRes.data || []);
-      setPopularProducts(prodRes.data || []);
+      setCategories(catRes?.data || []);
+      setPopularProducts(prodRes?.data || []);
     } catch (error) {
       console.error('Failed to fetch data:', error);
     } finally {
