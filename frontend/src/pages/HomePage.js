@@ -23,29 +23,32 @@ const HomePage = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        // Seed data first if needed
+  const fetchData = async () => {
+    try {
+      // Option 1 : Ne plus appeler seed du tout en prod
+      if (process.env.NODE_ENV === 'development') {
         try {
           await seedAPI.seed();
         } catch (e) {
-          // Already seeded, ignore
+          // ignore if already seeded
         }
-
-        const [catRes, prodRes] = await Promise.all([
-          categoriesAPI.getAll(),
-          productsAPI.getPopular(8)
-        ]);
-        setCategories(catRes.data);
-        setPopularProducts(prodRes.data);
-      } catch (error) {
-        console.error('Failed to fetch data:', error);
-      } finally {
-        setLoading(false);
       }
-    };
-    fetchData();
-  }, []);
+
+      const [catRes, prodRes] = await Promise.all([
+        categoriesAPI.getAll(),
+        productsAPI.getPopular(8)
+      ]);
+
+      setCategories(catRes.data || []);
+      setPopularProducts(prodRes.data || []);
+    } catch (error) {
+      console.error('Failed to fetch data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+  fetchData();
+}, []);
 
   const getCategoryIcon = (iconName) => {
     const icons = {
@@ -165,7 +168,7 @@ const HomePage = () => {
           </div>
 
           <div className="grid md:grid-cols-3 gap-6">
-            {categories.map((category, i) => (
+            {(categories || []).map((category, i) => (
               <motion.div
                 key={category.id}
                 initial={{ opacity: 0, y: 20 }}
@@ -215,7 +218,7 @@ const HomePage = () => {
             </Link>
           </div>
 
-          <ProductGrid products={popularProducts} loading={loading} />
+          <ProductGrid products={popularProducts || []} loading={loading} />
         </div>
       </section>
 
