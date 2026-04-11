@@ -10,10 +10,20 @@ import {
   CreditCard,
   MapPin,
   FileText,
+  Star,
 } from '@phosphor-icons/react';
 import { Layout } from '../components/layout';
 import { Button } from '../components/ui/button';
-import { ordersAPI } from '../lib/api';
+import { Textarea } from '../components/ui/textarea';
+import { Label } from '../components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '../components/ui/dialog';
+import { ordersAPI, supplierAPI } from '../lib/api';
 import { formatPrice, formatDate, getStatusColor, getStatusLabel, getImageUrl } from '../lib/utils';
 import { toast } from 'sonner';
 
@@ -74,6 +84,18 @@ const OrderDetailPage = () => {
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // P3-14: notation fournisseur
+  const [ratingDialogOpen, setRatingDialogOpen] = useState(false);
+  const [supplierRating, setSupplierRating] = useState(0);
+  const [supplierRatingData, setSupplierRatingData] = useState({
+    communication_rating: 0,
+    quality_rating: 0,
+    delivery_rating: 0,
+    comment: '',
+  });
+  const [ratingLoading, setRatingLoading] = useState(false);
+  const [alreadyRated, setAlreadyRated] = useState(false);
+
   useEffect(() => {
     const fetchOrder = async () => {
       try {
@@ -88,6 +110,51 @@ const OrderDetailPage = () => {
     };
     fetchOrder();
   }, [id, navigate]);
+
+  // P3-14: soumettre la notation du fournisseur
+  const handleSubmitSupplierRating = async () => {
+    if (supplierRating === 0 || supplierRatingData.communication_rating === 0 ||
+        supplierRatingData.quality_rating === 0 || supplierRatingData.delivery_rating === 0) {
+      toast.error('Veuillez remplir toutes les notes');
+      return;
+    }
+    setRatingLoading(true);
+    try {
+      await supplierAPI.rateSupplier(order.supplier_id, {
+        supplier_id: order.supplier_id,
+        order_id: order.id,
+        rating: supplierRating,
+        communication_rating: supplierRatingData.communication_rating,
+        quality_rating: supplierRatingData.quality_rating,
+        delivery_rating: supplierRatingData.delivery_rating,
+        comment: supplierRatingData.comment || null,
+      });
+      toast.success('Évaluation envoyée, merci !');
+      setAlreadyRated(true);
+      setRatingDialogOpen(false);
+    } catch (err) {
+      const msg = err.response?.data?.detail || 'Erreur lors de l\'envoi';
+      toast.error(typeof msg === 'string' ? msg : 'Erreur lors de l\'envoi');
+    } finally {
+      setRatingLoading(false);
+    }
+  };
+
+  const StarRow = ({ label, value, onChange }) => (
+    <div className="flex items-center justify-between">
+      <span className="text-sm text-slate-600 w-32">{label}</span>
+      <div className="flex gap-1">
+        {[1,2,3,4,5].map((s) => (
+          <button key={s} type="button" onClick={() => onChange(s)} className="focus:outline-none">
+            <Star
+              className={`w-6 h-6 ${s <= value ? 'text-yellow-500' : 'text-slate-200'}`}
+              weight={s <= value ? 'fill' : 'regular'}
+            />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 
   if (loading) {
     return (
@@ -245,6 +312,19 @@ const OrderDetailPage = () => {
               >
                 Contacter le fournisseur →
               </Link>
+              {/* P3-14: bouton évaluation fournisseur visible uniquement si commande livrée */}
+              {order.status === 'delivered' && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-3 w-full text-xs"
+                  onClick={() => setRatingDialogOpen(true)}
+                  disabled={alreadyRated}
+                >
+                  <Star className="w-3.5 h-3.5 mr-1.5" weight={alreadyRated ? 'fill' : 'regular'} />
+                  {alreadyRated ? 'Fournisseur noté' : 'Évaluer le fournisseur'}
+                </Button>
+              )}
             </div>
 
             {/* Payment */}
@@ -275,8 +355,75 @@ const OrderDetailPage = () => {
               </Button>
             )}
           </div>
-        </div>
       </div>
+    </div>
+
+    {/* P3-14: Dialog notation fournisseur */}
+    <Dialog open={ratingDialogOpen} onOpenChange={setRatingDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Évaluer {order?.supplier_name}</DialogTitle>
+            <DialogDescription>
+              Votre avis aide la communauté AfriSupply à identifier les meilleurs fournisseurs.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <StarRow label="Note globale" value={supplierRating} onChange={setSupplierRating} />
+            <div className="border-t pt-4 space-y-3">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Critères détaillés</p>
+              <StarRow
+                label="Communication"
+                value={supplierRatingData.communication_rating}
+                onChange={(v) => setSupplierRatingData((p) => ({ ...p, communication_rating: v }))}
+              />
+              <StarRow
+                label="Qualité produits"
+                value={supplierRatingData.quality_rating}
+                onChange={(v) => setSupplierRatingData((p) => ({ ...p, quality_rating: v }))}
+              />
+              <StarRow
+                label="Respect délais"
+                value={supplierRatingData.delivery_rating}
+                onChange={(v) => setSupplierRatingData((p) => ({ ...p, delivery_rating: v }))}
+              />
+            </div>
+            <div>
+              <Label htmlFor="supplier-comment">Commentaire (optionnel)</Label>
+              <Textarea
+                id="supplier-comment"
+                value={supplierRatingData.comment}
+                onChange={(e) => setSupplierRatingData((p) => ({ ...p, comment: e.target.value }))}
+                placeholder="Décrivez votre expérience avec ce fournisseur..."
+                rows={3}
+                className="mt-1"
+              />
+            </div>
+            <div className="flex gap-3 pt-2">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => setRatingDialogOpen(false)}
+                disabled={ratingLoading}
+              >
+                Annuler
+              </Button>
+              <Button
+                className="flex-1 bg-accent hover:bg-accent-hover"
+                onClick={handleSubmitSupplierRating}
+                disabled={
+                  ratingLoading ||
+                  supplierRating === 0 ||
+                  supplierRatingData.communication_rating === 0 ||
+                  supplierRatingData.quality_rating === 0 ||
+                  supplierRatingData.delivery_rating === 0
+                }
+              >
+                {ratingLoading ? "Envoi..." : "Envoyer l'évaluation"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 };

@@ -21,6 +21,10 @@ import RFQPage from "./pages/RFQPage";
 import OrderDetailPage from "./pages/OrderDetailPage";
 import ProfilePage from "./pages/ProfilePage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import BlogPage from "./pages/BlogPage";
+import LegalPage from "./pages/LegalPage";
+// P4-24: i18n
+import { LocaleProvider } from "./context/LocaleContext";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { RequireBuyer } from "./components/auth/RequireBuyer";
 import { RequireSupplier } from "./components/auth/RequireSupplier";
@@ -33,6 +37,7 @@ import EditProductPage from "./pages/EditProductPage";
 
 function App() {
   return (
+    <LocaleProvider>
     <AuthProvider>
       <CartProvider>
         <BrowserRouter>
@@ -46,6 +51,13 @@ function App() {
             <Route path="/suppliers/:supplierId" element={<SuppliersPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
+            {/* P3-13: page blog */}
+            <Route path="/blog" element={<BlogPage />} />
+            <Route path="/blog/:id" element={<BlogPage />} />
+            {/* P4-22: pages légales */}
+            <Route path="/terms" element={<LegalPage />} />
+            <Route path="/privacy" element={<LegalPage />} />
+            <Route path="/legal" element={<LegalPage />} />
             {/* P2-12: page mot de passe oublié */}
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
 
@@ -86,6 +98,7 @@ function App() {
         <Toaster position="top-right" richColors />
       </CartProvider>
     </AuthProvider>
+    </LocaleProvider>
   );
 }
 

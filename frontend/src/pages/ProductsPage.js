@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { 
   Funnel, 
@@ -43,8 +43,20 @@ const ProductsPage = () => {
   // P1 FIX: totalCount vient du serveur, pas du tableau local
   const [totalCount, setTotalCount] = useState(0);
 
-  // Filters
+  // P3-15: valeur tapée (immédiate) vs valeur debouncée (déclenchant la recherche)
   const [search, setSearch] = useState(searchParams.get('search') || '');
+  const [debouncedSearch, setDebouncedSearch] = useState(search);
+  const debounceTimer = useRef(null);
+
+  // Mettre à jour debouncedSearch 400ms après la dernière frappe
+  useEffect(() => {
+    clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => {
+      setDebouncedSearch(search);
+      setCurrentPage(1);
+    }, 400);
+    return () => clearTimeout(debounceTimer.current);
+  }, [search]);
   const [categoryId, setCategoryId] = useState(searchParams.get('category_id') || '');
   const [priceRange, setPriceRange] = useState([0, 10000000]);
   const [sortBy, setSortBy] = useState('created_at');
@@ -71,7 +83,9 @@ const ProductsPage = () => {
     setLoading(true);
     try {
       const baseParams = {
-        search: search || undefined,
+        // P3-15: on utilise debouncedSearch (pas search) pour ne déclencher la requête
+        // qu'après 400ms sans frappe
+        search: debouncedSearch || undefined,
         category_id: categoryId || undefined,
         min_price: priceRange[0] > 0 ? priceRange[0] : undefined,
         max_price: priceRange[1] < 10000000 ? priceRange[1] : undefined,
@@ -97,7 +111,7 @@ const ProductsPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [search, categoryId, priceRange, sortBy, sortOrder, currentPage]);
+  }, [debouncedSearch, categoryId, priceRange, sortBy, sortOrder, currentPage]);
 
   useEffect(() => {
     fetchProducts();
@@ -105,6 +119,9 @@ const ProductsPage = () => {
 
   const handleSearch = (e) => {
     e.preventDefault();
+    // Forcer la recherche immédiate sur soumission du formulaire
+    clearTimeout(debounceTimer.current);
+    setDebouncedSearch(search);
     setCurrentPage(1);
     setSearchParams((prev) => {
       if (search) prev.set('search', search);
@@ -115,6 +132,7 @@ const ProductsPage = () => {
 
   const clearFilters = () => {
     setSearch('');
+    setDebouncedSearch('');
     setCategoryId('');
     setPriceRange([0, 10000000]);
     setSortBy('created_at');

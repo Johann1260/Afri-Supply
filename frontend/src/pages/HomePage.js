@@ -10,47 +10,67 @@ import {
   TrendUp,
   Users,
   ShieldCheck,
-  Truck
+  Truck,
+  Sparkle
 } from '@phosphor-icons/react';
 import { Layout } from '../components/layout';
 import { ProductGrid } from '../components/products';
 import { Button } from '../components/ui/button';
 import { categoriesAPI, productsAPI, seedAPI } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
 
 const HomePage = () => {
+  const { isAuthenticated } = useAuth();
   const [categories, setCategories] = useState([]);
   const [popularProducts, setPopularProducts] = useState([]);
+  // P4-20: recommandations IA
+  const [recommendedProducts, setRecommendedProducts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [recoLoading, setRecoLoading] = useState(false);
 
   useEffect(() => {
-  const fetchData = async () => {
-    try {
-      if (process.env.NODE_ENV === 'development') {
-        try { await seedAPI.seed(); } catch (e) {}
+    const fetchData = async () => {
+      try {
+        if (process.env.NODE_ENV === 'development') {
+          try { await seedAPI.seed(); } catch (e) {}
+        }
+
+        const [catRes, prodRes] = await Promise.all([
+          categoriesAPI.getAll(),
+          productsAPI.getPopular(8),
+        ]);
+
+        setCategories(catRes?.data || []);
+        setPopularProducts(prodRes?.data || []);
+      } catch (error) {
+        console.error('Failed to fetch data:', error);
+      } finally {
+        setLoading(false);
       }
+    };
+    fetchData();
+  }, []);
 
-      const [catRes, prodRes] = await Promise.all([
-        categoriesAPI.getAll(),
-        productsAPI.getPopular(8)
-      ]);
-
-      setCategories(catRes?.data || []);
-      setPopularProducts(prodRes?.data || []);
-    } catch (error) {
-      console.error('Failed to fetch data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-  fetchData();
-}, []);
+  // P4-20: charger les recommandations IA si l'utilisateur est connecté
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const fetchRecommendations = async () => {
+      setRecoLoading(true);
+      try {
+        const res = await productsAPI.getRecommendations();
+        setRecommendedProducts(res?.data || []);
+      } catch (err) {
+        // Silencieux — la section ne s'affiche pas si l'appel échoue
+        console.error('Recommendations error:', err);
+      } finally {
+        setRecoLoading(false);
+      }
+    };
+    fetchRecommendations();
+  }, [isAuthenticated]);
 
   const getCategoryIcon = (iconName) => {
-    const icons = {
-      Wrench: Wrench,
-      HardHat: HardHat,
-      Gear: Gear,
-    };
+    const icons = { Wrench, HardHat, Gear };
     const Icon = icons[iconName] || Buildings;
     return <Icon className="w-8 h-8" weight="duotone" />;
   };
@@ -66,39 +86,34 @@ const HomePage = () => {
     {
       icon: ShieldCheck,
       title: 'Fournisseurs vérifiés',
-      description: 'Tous nos fournisseurs sont certifiés et audités pour garantir la qualité.'
+      description: 'Tous nos fournisseurs sont certifiés et audités pour garantir la qualité.',
     },
     {
       icon: Truck,
       title: 'Livraison CEMAC',
-      description: 'Livraison dans les 6 pays de la zone CEMAC avec suivi en temps réel.'
+      description: 'Livraison dans les 6 pays de la zone CEMAC avec suivi en temps réel.',
     },
     {
       icon: Users,
       title: 'Support dédié',
-      description: 'Une équipe d\'experts disponible pour accompagner vos achats B2B.'
+      description: "Une équipe d'experts disponible pour accompagner vos achats B2B.",
     },
   ];
 
   return (
     <Layout>
-      {/* Hero Section */}
+      {/* Hero */}
       <section className="relative bg-primary overflow-hidden">
         <div className="absolute inset-0 opacity-10">
-          <img 
+          <img
             src="https://images.pexels.com/photos/236698/pexels-photo-236698.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
             alt=""
             className="w-full h-full object-cover"
           />
         </div>
-        
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 lg:py-32">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5 }}
-            >
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
               <span className="inline-block px-4 py-1 bg-accent/20 text-accent rounded-full text-sm font-bold mb-6">
                 Zone CEMAC
               </span>
@@ -107,10 +122,9 @@ const HomePage = () => {
                 <span className="text-accent"> l'Afrique centrale</span>
               </h1>
               <p className="text-lg text-white/80 mb-8 max-w-xl">
-                Connectez-vous avec les meilleurs fournisseurs industriels du Cameroun, Gabon, 
+                Connectez-vous avec les meilleurs fournisseurs industriels du Cameroun, Gabon,
                 Congo, Tchad, Guinée Équatoriale et Centrafrique.
               </p>
-              
               <div className="flex flex-col sm:flex-row gap-4">
                 <Link to="/products">
                   <Button size="lg" className="bg-accent hover:bg-accent-hover w-full sm:w-auto" data-testid="hero-cta-products">
@@ -126,7 +140,6 @@ const HomePage = () => {
               </div>
             </motion.div>
 
-            {/* Stats */}
             <motion.div
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
@@ -134,10 +147,7 @@ const HomePage = () => {
               className="grid grid-cols-2 gap-4"
             >
               {stats.map((stat, i) => (
-                <div 
-                  key={i}
-                  className="bg-white/10 backdrop-blur-sm border border-white/20 rounded-lg p-6"
-                >
+                <div key={i} className="bg-white/10 backdrop-blur-sm border border-white/20 rounded-lg p-6">
                   <stat.icon className="w-8 h-8 text-accent mb-3" weight="duotone" />
                   <p className="font-heading font-bold text-3xl text-white">{stat.value}</p>
                   <p className="text-sm text-white/70">{stat.label}</p>
@@ -148,7 +158,35 @@ const HomePage = () => {
         </div>
       </section>
 
-      {/* Categories Section */}
+      {/* P4-20: Section recommandations IA — visible uniquement si connecté et recommandations disponibles */}
+      {isAuthenticated && (recoLoading || recommendedProducts.length > 0) && (
+        <section className="py-16 bg-gradient-to-b from-slate-50 to-white">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex justify-between items-end mb-10">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <Sparkle className="w-5 h-5 text-accent" weight="fill" />
+                  <p className="overline text-accent">RECOMMANDÉ POUR VOUS</p>
+                </div>
+                <h2 className="section-heading">Sélectionnés par notre IA</h2>
+                <p className="text-slate-500 mt-1 text-sm">
+                  Basé sur vos recherches et favoris récents
+                </p>
+              </div>
+              <Link
+                to="/products"
+                className="hidden sm:flex items-center gap-2 text-primary font-medium hover:text-accent transition-colors"
+              >
+                Voir tout
+                <ArrowRight className="w-4 h-4" />
+              </Link>
+            </div>
+            <ProductGrid products={recommendedProducts} loading={recoLoading} />
+          </div>
+        </section>
+      )}
+
+      {/* Categories */}
       <section className="py-16 lg:py-24 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-end mb-10">
@@ -157,8 +195,7 @@ const HomePage = () => {
               <h2 className="section-heading">Nos secteurs industriels</h2>
             </div>
             <Link to="/categories" className="hidden sm:flex items-center gap-2 text-primary font-medium hover:text-accent transition-colors">
-              Voir tout
-              <ArrowRight className="w-4 h-4" />
+              Voir tout <ArrowRight className="w-4 h-4" />
             </Link>
           </div>
 
@@ -170,12 +207,12 @@ const HomePage = () => {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3, delay: i * 0.1 }}
               >
-                <Link 
+                <Link
                   to={`/products?category_id=${category.id}`}
                   className="group block relative h-64 rounded-lg overflow-hidden"
                   data-testid={`category-card-${category.id}`}
                 >
-                  <img 
+                  <img
                     src={category.image_url || 'https://images.pexels.com/photos/236698/pexels-photo-236698.jpeg'}
                     alt={category.name}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
@@ -185,12 +222,8 @@ const HomePage = () => {
                     <div className="flex items-center gap-3 mb-2 text-accent">
                       {getCategoryIcon(category.icon)}
                     </div>
-                    <h3 className="font-heading font-bold text-xl text-white mb-1">
-                      {category.name}
-                    </h3>
-                    <p className="text-sm text-white/70 line-clamp-2">
-                      {category.description}
-                    </p>
+                    <h3 className="font-heading font-bold text-xl text-white mb-1">{category.name}</h3>
+                    <p className="text-sm text-white/70 line-clamp-2">{category.description}</p>
                   </div>
                 </Link>
               </motion.div>
@@ -199,7 +232,7 @@ const HomePage = () => {
         </div>
       </section>
 
-      {/* Popular Products Section */}
+      {/* Popular Products */}
       <section className="py-16 lg:py-24 bg-slate-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-end mb-10">
@@ -208,23 +241,20 @@ const HomePage = () => {
               <h2 className="section-heading">Les plus demandés</h2>
             </div>
             <Link to="/products" className="hidden sm:flex items-center gap-2 text-primary font-medium hover:text-accent transition-colors">
-              Voir tout
-              <ArrowRight className="w-4 h-4" />
+              Voir tout <ArrowRight className="w-4 h-4" />
             </Link>
           </div>
-
           <ProductGrid products={popularProducts || []} loading={loading} />
         </div>
       </section>
 
-      {/* Benefits Section */}
+      {/* Benefits */}
       <section className="py-16 lg:py-24 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-12">
             <p className="overline text-accent mb-2">POURQUOI NOUS CHOISIR</p>
             <h2 className="section-heading">Votre partenaire industriel de confiance</h2>
           </div>
-
           <div className="grid md:grid-cols-3 gap-8">
             {benefits.map((benefit, i) => (
               <motion.div
@@ -238,19 +268,15 @@ const HomePage = () => {
                 <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-6">
                   <benefit.icon className="w-8 h-8 text-primary" weight="duotone" />
                 </div>
-                <h3 className="font-heading font-bold text-xl text-slate-900 mb-3">
-                  {benefit.title}
-                </h3>
-                <p className="text-slate-600">
-                  {benefit.description}
-                </p>
+                <h3 className="font-heading font-bold text-xl text-slate-900 mb-3">{benefit.title}</h3>
+                <p className="text-slate-600">{benefit.description}</p>
               </motion.div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* CTA Section */}
+      {/* CTA */}
       <section className="py-16 lg:py-24 bg-primary">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <h2 className="font-heading font-bold text-3xl lg:text-4xl text-white mb-6">

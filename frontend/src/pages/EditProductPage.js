@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Upload, X, Save } from '@phosphor-icons/react';
+import { ArrowLeft, Upload, X } from '@phosphor-icons/react';
 import { Layout } from '../components/layout/Layout';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -21,9 +21,9 @@ export default function EditProductPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [categories, setCategories] = useState([]);
-  const [imageFiles, setImageFiles] = useState([]);        // Nouvelles images
+  const [imageFiles, setImageFiles] = useState([]);
   const [imagePreviews, setImagePreviews] = useState([]);
-  const [existingImages, setExistingImages] = useState([]); // Images déjà sur le produit
+  const [existingImages, setExistingImages] = useState([]);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -37,13 +37,12 @@ export default function EditProductPage() {
     is_available: true,
   });
 
-  // Charger données
   useEffect(() => {
     const fetchData = async () => {
       try {
         const [productRes, catRes] = await Promise.all([
           productsAPI.getById(id),
-          categoriesAPI.getAll()
+          categoriesAPI.getAll(),
         ]);
 
         const p = productRes.data;
@@ -63,7 +62,7 @@ export default function EditProductPage() {
         setExistingImages(p.images || []);
         setCategories(catRes.data || []);
       } catch (err) {
-        toast.error("Produit non trouvé");
+        toast.error('Produit non trouvé');
         navigate('/dashboard');
       } finally {
         setLoading(false);
@@ -75,34 +74,30 @@ export default function EditProductPage() {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-  };
-
-  const handleCategoryChange = (value) => {
-    setFormData(prev => ({ ...prev, category_id: value }));
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleNewImageChange = (e) => {
     const files = Array.from(e.target.files);
-    setImageFiles(prev => [...prev, ...files]);
-    const previews = files.map(f => URL.createObjectURL(f));
-    setImagePreviews(prev => [...prev, ...previews]);
+    setImageFiles((prev) => [...prev, ...files]);
+    const previews = files.map((f) => URL.createObjectURL(f));
+    setImagePreviews((prev) => [...prev, ...previews]);
   };
 
   const removeNewImage = (index) => {
     URL.revokeObjectURL(imagePreviews[index]);
-    setImageFiles(prev => prev.filter((_, i) => i !== index));
-    setImagePreviews(prev => prev.filter((_, i) => i !== index));
+    setImageFiles((prev) => prev.filter((_, i) => i !== index));
+    setImagePreviews((prev) => prev.filter((_, i) => i !== index));
   };
 
   const removeExistingImage = (index) => {
-    setExistingImages(prev => prev.filter((_, i) => i !== index));
+    setExistingImages((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.name || !formData.price || !formData.category_id) {
-      toast.error("Nom, prix et catégorie sont obligatoires");
+      toast.error('Nom, prix et catégorie sont obligatoires');
       return;
     }
 
@@ -119,44 +114,37 @@ export default function EditProductPage() {
       form.append('category_id', formData.category_id);
       form.append('specifications', formData.specifications || '{}');
       form.append('is_available', formData.is_available);
-
-      // Images existantes à conserver
       form.append('existing_images', JSON.stringify(existingImages || []));
-
-      // Nouvelles images
-      imageFiles.forEach(file => form.append('images', file));
+      imageFiles.forEach((file) => form.append('images', file));
 
       await productsAPI.update(id, form);
 
-      toast.success("Produit mis à jour avec succès !");
+      toast.success('Produit mis à jour avec succès !');
       navigate(`/products/${id}`);
     } catch (err) {
-  console.error("Erreur création produit:", err.response?.data);
+      console.error('Erreur mise à jour produit:', err.response?.data);
 
-  let errorMessage = "Erreur lors de l'ajout du produit";
+      let errorMessage = "Erreur lors de la mise à jour du produit";
 
-  if (err.response?.data?.detail) {
-    const detail = err.response.data.detail;
+      if (err.response?.data?.detail) {
+        const detail = err.response.data.detail;
+        if (Array.isArray(detail)) {
+          errorMessage = detail.map((d) => d.msg || d.type).join(' • ');
+        } else if (typeof detail === 'string') {
+          errorMessage = detail;
+        } else if (typeof detail === 'object') {
+          errorMessage = detail.msg || JSON.stringify(detail);
+        }
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
 
-    if (Array.isArray(detail)) {
-      // Erreur de validation Pydantic (le plus courant)
-      errorMessage = detail.map(d => d.msg || d.type).join(" • ");
-    } 
-    else if (typeof detail === "string") {
-      errorMessage = detail;
-    } 
-    else if (typeof detail === "object") {
-      errorMessage = detail.msg || JSON.stringify(detail);
+      toast.error(errorMessage);
+    } finally {
+      // P3-19 FIX: était setLoading(false) — doit être setSaving(false)
+      setSaving(false);
     }
-  } 
-  else if (err.message) {
-    errorMessage = err.message;
-  }
-
-  toast.error(errorMessage);
-} finally {
-  setLoading(false);
-}};
+  };
 
   if (loading) return <Layout><div className="p-12 text-center">Chargement...</div></Layout>;
 
@@ -186,7 +174,7 @@ export default function EditProductPage() {
                 </div>
                 <div>
                   <Label>Unité</Label>
-                  <Select value={formData.unit} onValueChange={v => setFormData(p => ({...p, unit: v}))}>
+                  <Select value={formData.unit} onValueChange={(v) => setFormData((p) => ({ ...p, unit: v }))}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="unité">Unité</SelectItem>
@@ -212,10 +200,12 @@ export default function EditProductPage() {
 
               <div>
                 <Label>Catégorie *</Label>
-                <Select value={formData.category_id} onValueChange={handleCategoryChange} required>
+                <Select value={formData.category_id} onValueChange={(v) => setFormData((p) => ({ ...p, category_id: v }))} required>
                   <SelectTrigger><SelectValue placeholder="Sélectionner" /></SelectTrigger>
                   <SelectContent>
-                    {categories.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                    {categories.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -233,7 +223,11 @@ export default function EditProductPage() {
                     {existingImages.map((url, i) => (
                       <div key={i} className="relative">
                         <img src={getImageUrl(url)} alt="" className="w-full h-32 object-cover rounded border" />
-                        <button type="button" onClick={() => removeExistingImage(i)} className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1">
+                        <button
+                          type="button"
+                          onClick={() => removeExistingImage(i)}
+                          className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1"
+                        >
                           <X className="w-4 h-4" />
                         </button>
                       </div>
@@ -255,7 +249,11 @@ export default function EditProductPage() {
                     {imagePreviews.map((p, i) => (
                       <div key={i} className="relative">
                         <img src={p} alt="" className="w-full h-32 object-cover rounded border" />
-                        <button type="button" onClick={() => removeNewImage(i)} className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1">
+                        <button
+                          type="button"
+                          onClick={() => removeNewImage(i)}
+                          className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1"
+                        >
                           <X className="w-4 h-4" />
                         </button>
                       </div>
@@ -265,7 +263,7 @@ export default function EditProductPage() {
               </div>
 
               <Button type="submit" className="w-full py-6 text-lg" disabled={saving}>
-                {saving ? "Enregistrement..." : "Enregistrer les modifications"}
+                {saving ? 'Enregistrement...' : 'Enregistrer les modifications'}
               </Button>
             </form>
           </CardContent>
