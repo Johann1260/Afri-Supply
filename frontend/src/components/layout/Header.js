@@ -14,7 +14,8 @@ import {
   Heart,
   ChatCircle,
   Bell,
-  FileText
+  FileText,
+  GearSix
 } from '@phosphor-icons/react';
 import {
   DropdownMenu,
@@ -37,7 +38,6 @@ export const Header = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
 
-  // Fetch unread notifications count
   useEffect(() => {
     if (!isAuthenticated) {
       setUnreadCount(0);
@@ -54,10 +54,7 @@ export const Header = () => {
     };
 
     fetchUnreadCount();
-
-    // Rafraîchissement automatique toutes les 25 secondes
     const interval = setInterval(fetchUnreadCount, 25000);
-
     return () => clearInterval(interval);
   }, [isAuthenticated]);
 
@@ -104,14 +101,10 @@ export const Header = () => {
         <div className="flex items-center justify-between gap-4">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2" data-testid="logo-link">
-            <img 
-              src="/logo.png" 
-              alt="AfriSupply"
-              className="h-10 w-auto"
-            />
+            <img src="/logo.png" alt="AfriSupply" className="h-10 w-auto" />
           </Link>
 
-          {/* Search bar - Desktop */}
+          {/* Search bar */}
           <form onSubmit={handleSearch} className="hidden md:flex flex-1 max-w-xl">
             <div className="relative w-full">
               <Input
@@ -148,7 +141,7 @@ export const Header = () => {
               )}
             </Link>
 
-            {/* Notifications avec badge */}
+            {/* Notifications */}
             {isAuthenticated && (
               <Link
                 to="/notifications"
@@ -168,8 +161,8 @@ export const Header = () => {
             {isAuthenticated ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button 
-                    variant="ghost" 
+                  <Button
+                    variant="ghost"
                     className="flex items-center gap-2"
                     data-testid="user-menu-trigger"
                   >
@@ -192,6 +185,13 @@ export const Header = () => {
                       Tableau de bord
                     </Link>
                   </DropdownMenuItem>
+                  {/* P2-9: lien vers la page profil */}
+                  <DropdownMenuItem asChild>
+                    <Link to="/profile" className="flex items-center gap-2" data-testid="profile-link">
+                      <GearSix className="w-4 h-4" />
+                      Mon profil
+                    </Link>
+                  </DropdownMenuItem>
                   <DropdownMenuItem asChild>
                     <Link to="/favorites" className="flex items-center gap-2" data-testid="favorites-link">
                       <Heart className="w-4 h-4" />
@@ -211,7 +211,7 @@ export const Header = () => {
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem 
+                  <DropdownMenuItem
                     onClick={handleLogout}
                     className="text-red-600 focus:text-red-600"
                     data-testid="logout-button"
@@ -242,11 +242,7 @@ export const Header = () => {
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               data-testid="mobile-menu-toggle"
             >
-              {mobileMenuOpen ? (
-                <X className="w-6 h-6" />
-              ) : (
-                <List className="w-6 h-6" />
-              )}
+              {mobileMenuOpen ? <X className="w-6 h-6" /> : <List className="w-6 h-6" />}
             </button>
           </div>
         </div>
@@ -273,7 +269,6 @@ export const Header = () => {
       {/* Mobile menu */}
       {mobileMenuOpen && (
         <div className="md:hidden bg-white border-t border-slate-200">
-          {/* Mobile search */}
           <form onSubmit={handleSearch} className="p-4">
             <div className="relative">
               <Input
@@ -283,16 +278,12 @@ export const Header = () => {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-4 pr-12"
               />
-              <button
-                type="submit"
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-2"
-              >
+              <button type="submit" className="absolute right-2 top-1/2 -translate-y-1/2 p-2">
                 <MagnifyingGlass className="w-5 h-5 text-slate-400" />
               </button>
             </div>
           </form>
-          
-          {/* Mobile nav links */}
+
           <nav className="px-4 pb-4 space-y-2">
             {navLinks.map((link) => (
               <Link
@@ -308,6 +299,24 @@ export const Header = () => {
                 {link.label}
               </Link>
             ))}
+            {isAuthenticated && (
+              <>
+                <Link
+                  to="/profile"
+                  className="block py-2 px-4 rounded-md font-medium text-slate-600 hover:bg-slate-50"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Mon profil
+                </Link>
+                <Link
+                  to="/dashboard"
+                  className="block py-2 px-4 rounded-md font-medium text-slate-600 hover:bg-slate-50"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Tableau de bord
+                </Link>
+              </>
+            )}
           </nav>
         </div>
       )}

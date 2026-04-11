@@ -32,7 +32,7 @@ import {
 import { productsAPI, reviewsAPI, favoritesAPI, rfqAPI, messagesAPI } from '../lib/api';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
-import { formatPrice, formatDate, getStatusColor } from '../lib/utils';
+import { formatPrice, formatDate, getStatusColor, getImageUrl } from '../lib/utils';
 import { toast } from 'sonner';
 
 const ProductDetailPage = () => {
@@ -259,7 +259,7 @@ const ProductDetailPage = () => {
                       selectedImage === i ? 'border-accent' : 'border-slate-200'
                     }`}
                   >
-                    <img src={img} alt="" className="w-full h-full object-cover" />
+                    <img src={getImageUrl(img)} alt="" className="w-full h-full object-cover" />
                   </button>
                 ))}
               </div>

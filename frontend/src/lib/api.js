@@ -16,8 +16,17 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Response interceptor - Refresh amélioré
-// Response interceptor - Version simplifiée et robuste
+// P1 FIX: Le backend /auth/refresh attend le refresh_token en Authorization header (Bearer),
+// pas en body. On corrige l'appel en conséquence et on ajoute un flag _refreshing
+// pour éviter les boucles infinies.
+let _refreshing = false;
+let _refreshSubscribers = [];
+
+const onRefreshed = (token) => {
+  _refreshSubscribers.forEach((cb) => cb(token));
+  _refreshSubscribers = [];
+};
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -34,29 +43,51 @@ api.interceptors.response.use(
         return Promise.reject(error);
       }
 
-      try {
-        const res = await axios.post(`${API_URL}/api/auth/refresh`, {}, {
-          headers: { Authorization: `Bearer ${refreshToken}` }
+      // Si un refresh est déjà en cours, mettre la requête en file d'attente
+      if (_refreshing) {
+        return new Promise((resolve) => {
+          _refreshSubscribers.push((newToken) => {
+            originalRequest.headers.Authorization = `Bearer ${newToken}`;
+            resolve(api(originalRequest));
+          });
         });
+      }
+
+      _refreshing = true;
+
+      try {
+        // P1 FIX: envoi du refresh_token en Authorization header (comme attendu par le backend)
+        const res = await axios.post(
+          `${API_URL}/api/auth/refresh`,
+          {},
+          { headers: { Authorization: `Bearer ${refreshToken}` } }
+        );
 
         const { access_token, refresh_token } = res.data;
 
         localStorage.setItem('access_token', access_token);
         localStorage.setItem('refresh_token', refresh_token);
 
+        api.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
         originalRequest.headers.Authorization = `Bearer ${access_token}`;
+
+        onRefreshed(access_token);
         return api(originalRequest);
       } catch (refreshError) {
-        console.error('Refresh failed');
+        console.error('Refresh failed — redirecting to login');
         localStorage.clear();
+        _refreshSubscribers = [];
         window.location.href = '/login?expired=true';
         return Promise.reject(refreshError);
+      } finally {
+        _refreshing = false;
       }
     }
 
     return Promise.reject(error);
   }
 );
+
 // Auth
 export const authAPI = {
   login: async (data) => {
@@ -72,7 +103,7 @@ export const authAPI = {
 
   register: (data) => api.post('/auth/register', data),
 };
-// Les autres APIs restent identiques
+
 export const categoriesAPI = {
   getAll: () => api.get('/categories'),
   create: (data) => api.post('/categories', data),
@@ -84,11 +115,10 @@ export const productsAPI = {
   getRecommendations: () => api.get('/products/recommendations'),
   getById: (id) => api.get(`/products/${id}`),
   
-  // Création avec support upload images (FormData)
   create: (data) => {
     if (data instanceof FormData) {
       return api.post('/products', data, {
-        headers: { 'Content-Type': 'multipart/form-data' }, // Important
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
     }
     return api.post('/products', data);
@@ -97,8 +127,12 @@ export const productsAPI = {
   update: (id, data) => api.put(`/products/${id}`, data),
   delete: (id) => api.delete(`/products/${id}`),
   
-  // Pour le dashboard supplier
   getSupplierProducts: () => api.get('/supplier/products'),
+
+  // P1 FIX: endpoint dédié pour obtenir le count total (nécessaire pour la pagination serveur)
+  // Le backend actuel ne retourne pas de count — cette méthode fait une requête sans limit
+  // pour calculer le total. À remplacer par un vrai endpoint /products/count quand disponible.
+  getCount: (params) => api.get('/products', { params: { ...params, skip: 0, limit: 9999 } }),
 };
 
 export const cartAPI = {
@@ -124,6 +158,7 @@ export const paymentAPI = {
 export const reviewsAPI = {
   create: (data) => api.post('/reviews', data),
   getByProduct: (productId) => api.get(`/products/${productId}/reviews`),
+  getPending: () => api.get('/reviews/pending'),
 };
 
 export const favoritesAPI = {

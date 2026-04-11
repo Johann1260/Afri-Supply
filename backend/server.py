@@ -1,6 +1,7 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, WebSocket, WebSocketDisconnect, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
@@ -20,9 +21,10 @@ import shutil
 from uuid import uuid4
 
 
-# Crée le dossier d'upload au démarrage
-UPLOAD_DIR = "uploads/products"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+# ======================= CONFIG UPLOAD IMAGES =======================
+UPLOAD_DIR = Path("uploads/products")
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -45,6 +47,9 @@ security = HTTPBearer()
 
 # Create the main app
 app = FastAPI(title="AfriSupply API", description="B2B Industrial Marketplace for Central Africa")
+
+# Servir les images statiques
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -139,7 +144,7 @@ class ProductResponse(BaseModel):
     id: str
     name: str
     name_en: Optional[str] = None
-    description: str
+    description: Optional[str] = None      # ← Change ici
     description_en: Optional[str] = None
     category_id: str
     category_name: Optional[str] = None
@@ -606,13 +611,23 @@ async def get_products(
 
 @api_router.get("/products/popular", response_model=List[ProductResponse])
 async def get_popular_products(limit: int = 8):
-    products = await db.products.find({"is_available": True}, {"_id": 0}).sort("rating", -1).limit(limit).to_list(limit)
+    products = await db.products.find(
+        {"is_available": True}, 
+        {"_id": 0}
+    ).sort("rating", -1).limit(limit).to_list(limit)
+
     for product in products:
+        # Correction critique : si description est None, on la transforme en chaîne vide
+        if product.get("description") is None:
+            product["description"] = ""
+
         category = await db.categories.find_one({"id": product.get("category_id")}, {"_id": 0})
         supplier = await db.users.find_one({"id": product.get("supplier_id")}, {"_id": 0})
+        
         product["category_name"] = category.get("name") if category else None
         product["supplier_name"] = supplier.get("full_name") if supplier else None
         product["supplier_company"] = supplier.get("company_name") if supplier else None
+
     return products
 
 @api_router.get("/products/recommendations", response_model=List[ProductResponse])
@@ -685,10 +700,12 @@ async def get_product(product_id: str, current_user: dict = Depends(get_current_
     
     return product
 
+# ======================= PRODUCTS ENDPOINTS =======================
+# ======================= CREATE PRODUCT =======================
 @api_router.post("/products", response_model=ProductResponse)
 async def create_product(
     name: str = Form(...),
-    description: Optional[str] = Form(None),
+    description: str = Form(""),
     price: float = Form(...),
     unit: str = Form("unité"),
     min_order_quantity: int = Form(1),
@@ -696,33 +713,32 @@ async def create_product(
     category_id: str = Form(...),
     specifications: str = Form("{}"),
     is_available: bool = Form(True),
-    images: List[UploadFile] = File(default=[]),   # ← Support upload multiple
+    images: List[UploadFile] = File([]),
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user["user_type"] != "supplier":
-        raise HTTPException(status_code=403, detail="Only suppliers can create products")
+    if current_user.get("user_type") != "supplier":
+        raise HTTPException(status_code=403, detail="Seuls les fournisseurs peuvent créer des produits")
 
-    # Sauvegarde des images
     image_urls = []
     for image in images:
-        if image and image.content_type and image.content_type.startswith("image/"):
-            ext = image.filename.split('.')[-1].lower()
-            filename = f"{uuid4()}.{ext}"
-            file_path = os.path.join(UPLOAD_DIR, filename)
-            
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(image.file, buffer)
-            
+        if image.content_type and image.content_type.startswith("image/"):
+            ext = Path(image.filename or ".jpg").suffix.lower()
+            filename = f"{uuid.uuid4()}{ext}"
+            file_path = UPLOAD_DIR / filename
+            with open(file_path, "wb") as f:
+                shutil.copyfileobj(image.file, f)
             image_urls.append(f"/uploads/products/{filename}")
 
-    # Création du document
+    try:
+        specs_dict = json.loads(specifications)
+    except:
+        specs_dict = {}
+
     product_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
 
     product_doc = {
         "id": product_id,
-        "supplier_id": current_user["id"],
-        "supplier_company": current_user.get("company_name"),
         "name": name,
         "description": description,
         "price": price,
@@ -730,9 +746,10 @@ async def create_product(
         "min_order_quantity": min_order_quantity,
         "stock_quantity": stock_quantity,
         "category_id": category_id,
-        "specifications": json.loads(specifications) if specifications else {},
-        "is_available": is_available,
+        "specifications": specs_dict,
         "images": image_urls,
+        "is_available": is_available,
+        "supplier_id": current_user["id"],
         "rating": 0.0,
         "review_count": 0,
         "created_at": now,
@@ -740,35 +757,98 @@ async def create_product(
 
     await db.products.insert_one(product_doc)
 
-    # Enrichissement pour la réponse
+    # Enrich response
     category = await db.categories.find_one({"id": category_id}, {"_id": 0})
-    
-    return {
-        **product_doc,
-        "category_name": category.get("name") if category else None,
-        "supplier_name": current_user.get("full_name"),
-        "supplier_company": current_user.get("company_name"),
-    }
+    product_doc["category_name"] = category.get("name") if category else None
+    product_doc["supplier_name"] = current_user.get("full_name")
+    product_doc["supplier_company"] = current_user.get("company_name")
 
+    return ProductResponse(**product_doc)
+
+
+# ======================= UPDATE PRODUCT =======================
 @api_router.put("/products/{product_id}", response_model=ProductResponse)
-async def update_product(product_id: str, product: ProductUpdate, current_user: dict = Depends(get_current_user)):
-    existing = await db.products.find_one({"id": product_id}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Product not found")
-    if existing["supplier_id"] != current_user["id"]:
-        raise HTTPException(status_code=403, detail="Not your product")
-    
-    update_data = {k: v for k, v in product.model_dump().items() if v is not None}
-    if update_data:
-        await db.products.update_one({"id": product_id}, {"$set": update_data})
-    
+async def update_product(
+    product_id: str,
+    name: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
+    price: Optional[float] = Form(None),
+    unit: Optional[str] = Form(None),
+    min_order_quantity: Optional[int] = Form(None),
+    stock_quantity: Optional[int] = Form(None),
+    category_id: Optional[str] = Form(None),
+    specifications: Optional[str] = Form(None),
+    is_available: Optional[bool] = Form(None),
+    existing_images: str = Form("[]"),   # JSON string
+    images: List[UploadFile] = File([]),
+    current_user: dict = Depends(get_current_user)
+):
+    product = await db.products.find_one({"id": product_id})
+    if not product:
+        raise HTTPException(status_code=404, detail="Produit non trouvé")
+
+    if product["supplier_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Accès refusé")
+
+    # Parse existing_images
+    try:
+        existing_list = json.loads(existing_images)
+        if not isinstance(existing_list, list):
+            existing_list = []
+    except Exception:
+        existing_list = []
+
+    # Nouvelles images
+    new_image_urls = []
+    for image in images:
+        if image.content_type and image.content_type.startswith("image/"):
+            ext = Path(image.filename or ".jpg").suffix.lower()
+            filename = f"{uuid.uuid4()}{ext}"
+            file_path = UPLOAD_DIR / filename
+            with open(file_path, "wb") as f:
+                shutil.copyfileobj(image.file, f)
+            new_image_urls.append(f"/uploads/products/{filename}")
+
+    final_images = existing_list + new_image_urls
+
+    # Parse specifications
+    try:
+        specs_dict = json.loads(specifications) if specifications else {}
+    except Exception:
+        specs_dict = {}
+
+    # Construction des données à mettre à jour (seulement les champs fournis)
+    update_data = {}
+    if name is not None: update_data["name"] = name
+    if description is not None: update_data["description"] = description
+    if price is not None: update_data["price"] = price
+    if unit is not None: update_data["unit"] = unit
+    if min_order_quantity is not None: update_data["min_order_quantity"] = min_order_quantity
+    if stock_quantity is not None: update_data["stock_quantity"] = stock_quantity
+    if category_id is not None: update_data["category_id"] = category_id
+    if specifications is not None: update_data["specifications"] = specs_dict
+    if is_available is not None: update_data["is_available"] = is_available
+    if final_images: update_data["images"] = final_images
+    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    if not update_data:
+        raise HTTPException(status_code=400, detail="Aucune donnée à mettre à jour")
+
+    await db.products.update_one({"id": product_id}, {"$set": update_data})
+
+    # Retourner le produit mis à jour
     updated = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not updated:
+        raise HTTPException(status_code=404, detail="Produit non trouvé après mise à jour")
+
     category = await db.categories.find_one({"id": updated.get("category_id")}, {"_id": 0})
+    supplier = await db.users.find_one({"id": updated["supplier_id"]}, {"_id": 0})
+
     updated["category_name"] = category.get("name") if category else None
-    updated["supplier_name"] = current_user["full_name"]
-    updated["supplier_company"] = current_user.get("company_name")
-    
-    return updated
+    updated["supplier_name"] = supplier.get("full_name") if supplier else None
+    updated["supplier_company"] = supplier.get("company_name") if supplier else None
+
+    return ProductResponse(**updated)
 
 @api_router.delete("/products/{product_id}")
 async def delete_product(product_id: str, current_user: dict = Depends(get_current_user)):

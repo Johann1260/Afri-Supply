@@ -6,7 +6,8 @@ import {
   CheckCircle,
   XCircle,
   Spinner,
-  DeviceMobile
+  DeviceMobile,
+  MapPin
 } from '@phosphor-icons/react';
 import { Layout } from '../components/layout';
 import { Button } from '../components/ui/button';
@@ -30,8 +31,18 @@ import {
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { ordersAPI, paymentAPI, mobileMoneyAPI } from '../lib/api';
-import { formatPrice } from '../lib/utils';
+import { formatPrice, getImageUrl } from '../lib/utils';
 import { toast } from 'sonner';
+
+// P1 FIX: liste des pays CEMAC pour le sélecteur d'adresse
+const CEMAC_COUNTRIES = [
+  'Cameroun',
+  'Gabon',
+  'Congo',
+  'Tchad',
+  'Guinée Équatoriale',
+  'Centrafrique',
+];
 
 const CheckoutPage = () => {
   const navigate = useNavigate();
@@ -47,6 +58,7 @@ const CheckoutPage = () => {
   });
   const [mobileMoneyTransaction, setMobileMoneyTransaction] = useState(null);
   
+  // P1 FIX: ajout des champs d'adresse de livraison (shipping_address, shipping_city, shipping_country)
   const [formData, setFormData] = useState({
     shipping_address: '',
     shipping_city: user?.city || '',
@@ -57,7 +69,6 @@ const CheckoutPage = () => {
 
   const sessionId = searchParams.get('session_id');
 
-  // Check payment status on return from Stripe
   useEffect(() => {
     if (sessionId) {
       checkPaymentStatus(sessionId);
@@ -104,24 +115,34 @@ const CheckoutPage = () => {
 
   const total = cart.total;
 
+  // P1 FIX: validation des champs d'adresse avant soumission
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (!formData.shipping_address.trim()) {
+      toast.error('Veuillez entrer votre adresse de livraison');
+      return;
+    }
+    if (!formData.shipping_city.trim()) {
+      toast.error('Veuillez entrer votre ville');
+      return;
+    }
+    if (!formData.shipping_country) {
+      toast.error('Veuillez sélectionner votre pays');
+      return;
+    }
+
     setLoading(true);
 
     try {
-      // Create orders first
       await ordersAPI.create(formData);
 
       if (formData.payment_method === 'mobile_money') {
-        // Open Mobile Money dialog
         setMobileMoneyDialogOpen(true);
         setLoading(false);
       } else {
-        // Create Stripe checkout session
         const originUrl = window.location.origin;
         const res = await paymentAPI.createCheckoutSession(originUrl);
-        
-        // Redirect to Stripe
         window.location.href = res.data.url;
       }
     } catch (error) {
@@ -142,7 +163,7 @@ const CheckoutPage = () => {
       setMobileMoneyTransaction(res.data);
       toast.success('Demande de paiement envoyée');
     } catch (error) {
-      toast.error('Erreur lors de l\'initialisation du paiement');
+      toast.error("Erreur lors de l'initialisation du paiement");
     } finally {
       setLoading(false);
     }
@@ -236,6 +257,61 @@ const CheckoutPage = () => {
           {/* Checkout form */}
           <div className="lg:col-span-2">
             <form onSubmit={handleSubmit} className="space-y-6">
+
+              {/* P1 FIX: Adresse de livraison */}
+              <div className="bg-white border border-slate-200 rounded-lg p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
+                    <MapPin className="w-5 h-5 text-primary" />
+                  </div>
+                  <h2 className="font-heading font-bold text-lg">Adresse de livraison</h2>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <Label htmlFor="shipping_address">Adresse *</Label>
+                    <Input
+                      id="shipping_address"
+                      value={formData.shipping_address}
+                      onChange={(e) => setFormData({ ...formData, shipping_address: e.target.value })}
+                      placeholder="Rue, quartier, numéro..."
+                      required
+                      data-testid="shipping-address"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="shipping_city">Ville *</Label>
+                      <Input
+                        id="shipping_city"
+                        value={formData.shipping_city}
+                        onChange={(e) => setFormData({ ...formData, shipping_city: e.target.value })}
+                        placeholder="Douala"
+                        required
+                        data-testid="shipping-city"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="shipping_country">Pays *</Label>
+                      <Select
+                        value={formData.shipping_country}
+                        onValueChange={(val) => setFormData({ ...formData, shipping_country: val })}
+                      >
+                        <SelectTrigger data-testid="shipping-country">
+                          <SelectValue placeholder="Sélectionner un pays" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {CEMAC_COUNTRIES.map((c) => (
+                            <SelectItem key={c} value={c}>{c}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {/* Payment method */}
               <div className="bg-white border border-slate-200 rounded-lg p-6">
                 <div className="flex items-center gap-3 mb-4">
@@ -313,13 +389,12 @@ const CheckoutPage = () => {
             <div className="bg-white border border-slate-200 rounded-lg p-6 sticky top-24">
               <h2 className="font-heading font-bold text-lg mb-4">Récapitulatif</h2>
               
-              {/* Items */}
               <div className="space-y-3 mb-4 max-h-64 overflow-y-auto">
                 {cart.items.map((item) => (
                   <div key={item.product_id} className="flex gap-3">
                     <div className="w-12 h-12 bg-slate-100 rounded overflow-hidden flex-shrink-0">
                       {item.product_image && (
-                        <img src={item.product_image} alt="" className="w-full h-full object-cover" />
+                        <img src={getImageUrl(item.product_image)} alt="" className="w-full h-full object-cover" />
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
@@ -338,7 +413,6 @@ const CheckoutPage = () => {
                 </div>
               </div>
 
-              {/* Trust badges */}
               <div className="flex items-center justify-center gap-4 mt-6 pt-4 border-t">
                 <div className="flex items-center gap-2 text-slate-500">
                   <ShieldCheck className="w-5 h-5" />
@@ -423,7 +497,7 @@ const CheckoutPage = () => {
                 disabled={loading}
                 data-testid="confirm-mobile-money"
               >
-                {loading ? 'Vérification...' : 'J\'ai effectué le paiement'}
+                {loading ? 'Vérification...' : "J'ai effectué le paiement"}
               </Button>
             </div>
           )}

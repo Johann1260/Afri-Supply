@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { productsAPI, categoriesAPI } from '../lib/api';
 import { toast } from 'sonner';
+import { getImageUrl } from '../lib/utils';
 import { useAuth } from '../context/AuthContext';
 
 export default function EditProductPage() {
@@ -119,23 +120,43 @@ export default function EditProductPage() {
       form.append('specifications', formData.specifications || '{}');
       form.append('is_available', formData.is_available);
 
+      // Images existantes à conserver
+      form.append('existing_images', JSON.stringify(existingImages || []));
+
       // Nouvelles images
       imageFiles.forEach(file => form.append('images', file));
-
-      // Images existantes à conserver
-      existingImages.forEach(url => form.append('existing_images', url));
 
       await productsAPI.update(id, form);
 
       toast.success("Produit mis à jour avec succès !");
       navigate(`/products/${id}`);
     } catch (err) {
-      console.error(err);
-      toast.error("Erreur lors de la mise à jour");
-    } finally {
-      setSaving(false);
+  console.error("Erreur création produit:", err.response?.data);
+
+  let errorMessage = "Erreur lors de l'ajout du produit";
+
+  if (err.response?.data?.detail) {
+    const detail = err.response.data.detail;
+
+    if (Array.isArray(detail)) {
+      // Erreur de validation Pydantic (le plus courant)
+      errorMessage = detail.map(d => d.msg || d.type).join(" • ");
+    } 
+    else if (typeof detail === "string") {
+      errorMessage = detail;
+    } 
+    else if (typeof detail === "object") {
+      errorMessage = detail.msg || JSON.stringify(detail);
     }
-  };
+  } 
+  else if (err.message) {
+    errorMessage = err.message;
+  }
+
+  toast.error(errorMessage);
+} finally {
+  setLoading(false);
+}};
 
   if (loading) return <Layout><div className="p-12 text-center">Chargement...</div></Layout>;
 
@@ -211,7 +232,7 @@ export default function EditProductPage() {
                   <div className="grid grid-cols-4 gap-4 mt-3">
                     {existingImages.map((url, i) => (
                       <div key={i} className="relative">
-                        <img src={url} alt="" className="w-full h-32 object-cover rounded border" />
+                        <img src={getImageUrl(url)} alt="" className="w-full h-32 object-cover rounded border" />
                         <button type="button" onClick={() => removeExistingImage(i)} className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1">
                           <X className="w-4 h-4" />
                         </button>

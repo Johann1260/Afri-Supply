@@ -9,6 +9,7 @@ import { Textarea } from '../components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { productsAPI, categoriesAPI } from '../lib/api';
+import { getImageUrl } from '../lib/utils';
 import { toast } from 'sonner';
 import { useAuth } from '../context/AuthContext';
 
@@ -100,13 +101,33 @@ export default function NewProductPage() {
       const productId = response.data.id || response.data._id;
       navigate(`/products/${productId}`);
 
-    } catch (err) {
-      console.error(err);
-      toast.error(err.response?.data?.detail || "Erreur lors de l'ajout du produit");
-    } finally {
-      setLoading(false);
+   } catch (err) {
+  console.error("Erreur création produit:", err.response?.data);
+
+  let errorMessage = "Erreur lors de l'ajout du produit";
+
+  if (err.response?.data?.detail) {
+    const detail = err.response.data.detail;
+
+    if (Array.isArray(detail)) {
+      // Erreur de validation Pydantic (le plus courant)
+      errorMessage = detail.map(d => d.msg || d.type).join(" • ");
+    } 
+    else if (typeof detail === "string") {
+      errorMessage = detail;
+    } 
+    else if (typeof detail === "object") {
+      errorMessage = detail.msg || JSON.stringify(detail);
     }
-  };
+  } 
+  else if (err.message) {
+    errorMessage = err.message;
+  }
+
+  toast.error(errorMessage);
+} finally {
+  setLoading(false);
+}};
 
   return (
     <Layout>
@@ -191,7 +212,7 @@ export default function NewProductPage() {
                   <div className="grid grid-cols-4 gap-4 mt-6">
                     {imagePreviews.map((preview, i) => (
                       <div key={i} className="relative">
-                        <img src={preview} alt="" className="w-full h-32 object-cover rounded-lg border" />
+                        <img src={getImageUrl(preview)} alt="" className="w-full h-32 object-cover rounded-lg border" />
                         <button type="button" onClick={() => removeImage(i)} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1">
                           <X className="w-4 h-4" />
                         </button>

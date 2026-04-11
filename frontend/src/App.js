@@ -5,12 +5,6 @@ import { AuthProvider } from "./context/AuthContext";
 import { CartProvider } from "./context/CartContext";
 import { Toaster } from "./components/ui/sonner";
 
-// import {
-//   ProtectedRoute,
-//   RequireBuyer,
-//   RequireSupplier,
-// } from "./components/auth"; // ← nouveau
-
 import {
   HomePage,
   ProductsPage,
@@ -24,6 +18,9 @@ import NotificationsPage from "./pages/NotificationsPage";
 import MessagesPage from "./pages/MessagesPage";
 import SuppliersPage from "./pages/SuppliersPage";
 import RFQPage from "./pages/RFQPage";
+import OrderDetailPage from "./pages/OrderDetailPage";
+import ProfilePage from "./pages/ProfilePage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { RequireBuyer } from "./components/auth/RequireBuyer";
 import { RequireSupplier } from "./components/auth/RequireSupplier";
@@ -49,36 +46,37 @@ function App() {
             <Route path="/suppliers/:supplierId" element={<SuppliersPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
-            <Route path="/messages" element={<MessagesPage />} />
-
+            {/* P2-12: page mot de passe oublié */}
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
 
             {/* Routes protégées - tout utilisateur connecté */}
             <Route element={<ProtectedRoute />}>
               <Route path="/cart" element={<CartPage />} />
+              {/* P2-9: page profil utilisateur */}
+              <Route path="/profile" element={<ProfilePage />} />
               <Route path="/checkout" element={<CheckoutPage />} />
+              <Route path="/messages" element={<MessagesPage />} />
               <Route path="/messages/:partnerId" element={<MessagesPage />} />
               <Route path="/notifications" element={<NotificationsPage />} />
+              {/* P1 FIX: /orders/:id est accessible à tout utilisateur connecté (acheteur ET fournisseur) */}
+              <Route path="/orders/:id" element={<OrderDetailPage />} />
+              {/* P1 FIX: /rfq accessible aux buyers ET suppliers (RFQPage gère les deux rôles en interne) */}
+              <Route path="/rfq" element={<RFQPage />} />
+              <Route path="/rfq/:rfqId" element={<RFQPage />} />
             </Route>
 
             <Route path="/dashboard" element={<DashboardRedirect />} />
 
             {/* Routes acheteur uniquement */}
             <Route element={<RequireBuyer />}>
-              <Route path="/rfq" element={<RFQPage />} />
-              <Route path="/rfq/:rfqId" element={<RFQPage />} />
               <Route path="/dashboard/buyer" element={<DashboardBuyer />} />
-              <Route path="/messages" element={<MessagesPage />} />
-              {/* Ajoute ici d'autres routes buyer-only */}
             </Route>
 
             {/* Routes fournisseur uniquement */}
             <Route element={<RequireSupplier />}>
               <Route path="/dashboard/supplier" element={<DashboardSupplier />} />
-              <Route path="/messages" element={<MessagesPage />} />
-              <Route path="/orders/:id" element={<DashboardSupplier />} />
               <Route path="/dashboard/products/new" element={<NewProductPage />} />
               <Route path="/dashboard/products/edit/:id" element={<EditProductPage />} />
-              {/* Ajoute ici d'autres routes supplier-only */}
             </Route>
 
             {/* Catch-all */}

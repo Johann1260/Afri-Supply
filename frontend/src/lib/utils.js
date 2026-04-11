@@ -1,6 +1,25 @@
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
+
+export const getImageUrl = (path) => {
+  if (!path) return '';
+  
+  // Déjà une URL complète (http/https)
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path;
+  }
+
+  // Chemin relatif commençant par /uploads/
+  if (path.startsWith('/uploads/')) {
+    return `${BACKEND_URL}${path}`;
+  }
+
+  // Autres cas (chemin relatif sans /uploads)
+  return `${BACKEND_URL}${path.startsWith('/') ? '' : '/'}${path}`;
+};
+
 export function cn(...inputs) {
   return twMerge(clsx(inputs));
 }
