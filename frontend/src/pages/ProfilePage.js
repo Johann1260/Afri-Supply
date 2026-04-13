@@ -24,6 +24,7 @@ import {
   AlertDialogTitle,
 } from '../components/ui/alert-dialog';
 import { useAuth } from '../context/AuthContext';
+import { useLocale } from '../context/LocaleContext';
 import api from '../lib/api';
 import { toast } from 'sonner';
 
@@ -34,6 +35,7 @@ const CEMAC_COUNTRIES = [
 const ProfilePage = () => {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const { t } = useLocale();
 
   const [saving, setSaving] = useState(false);
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
@@ -65,7 +67,7 @@ const ProfilePage = () => {
       // Mettre à jour le localStorage avec les nouvelles données
       const updated = { ...user, ...res.data };
       localStorage.setItem('user', JSON.stringify(updated));
-      toast.success('Profil mis à jour avec succès');
+      toast.success(t('profile.saved'));
     } catch (err) {
       // Si l'endpoint n'existe pas encore, on simule le succès côté local
       const updated = { ...user, ...formData };
@@ -87,7 +89,7 @@ const ProfilePage = () => {
       return;
     }
     if (passwordData.new_password !== passwordData.confirm_password) {
-      toast.error('Les mots de passe ne correspondent pas');
+      toast.error(t('profile.pwd.mismatch'));
       return;
     }
     setPasswordSaving(true);
@@ -99,7 +101,7 @@ const ProfilePage = () => {
       toast.success('Mot de passe modifié avec succès');
       setPasswordData({ current_password: '', new_password: '', confirm_password: '' });
     } catch (err) {
-      const msg = err.response?.data?.detail || 'Mot de passe actuel incorrect';
+      const msg = err.response?.data?.detail || `${t('profile.current.pwd')} incorrect`;
       toast.error(msg);
     } finally {
       setPasswordSaving(false);
@@ -116,11 +118,11 @@ const ProfilePage = () => {
       <div className="max-w-3xl mx-auto px-4 py-8">
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="font-heading font-bold text-2xl text-slate-900">Mon profil</h1>
+            <h1 className="font-heading font-bold text-2xl text-slate-900">{t('profile.title')}</h1>
             <p className="text-slate-500 mt-1">{user?.email}</p>
           </div>
           <span className="px-3 py-1 bg-primary/10 text-primary text-sm font-medium rounded-full capitalize">
-            {user?.user_type === 'buyer' ? 'Acheteur' : 'Fournisseur'}
+            {user?.user_type === 'buyer' ? t('profile.type.buyer') : t('profile.type.supplier')}
           </span>
         </div>
 
@@ -146,7 +148,7 @@ const ProfilePage = () => {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="company_name">Entreprise</Label>
+                    <Label htmlFor="company_name">{t('profile.company')}</Label>
                     <div className="relative">
                       <Buildings className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                       <Input
@@ -161,7 +163,7 @@ const ProfilePage = () => {
                 </div>
 
                 <div>
-                  <Label htmlFor="phone">Téléphone</Label>
+                  <Label htmlFor="phone">{t('profile.phone')}</Label>
                   <div className="relative">
                     <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <Input
@@ -176,7 +178,7 @@ const ProfilePage = () => {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="city">Ville</Label>
+                    <Label htmlFor="city">{t('profile.city')}</Label>
                     <div className="relative">
                       <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                       <Input
@@ -189,7 +191,7 @@ const ProfilePage = () => {
                     </div>
                   </div>
                   <div>
-                    <Label htmlFor="country">Pays</Label>
+                    <Label htmlFor="country">{t('profile.country')}</Label>
                     <Select
                       value={formData.country}
                       onValueChange={(val) => setFormData({ ...formData, country: val })}
@@ -213,7 +215,7 @@ const ProfilePage = () => {
                     disabled={saving}
                   >
                     <FloppyDisk className="w-4 h-4 mr-2" />
-                    {saving ? 'Enregistrement...' : 'Enregistrer les modifications'}
+                    {saving ? t('profile.saving') : t('profile.save')}
                   </Button>
                 </div>
               </form>
@@ -231,7 +233,7 @@ const ProfilePage = () => {
             <CardContent>
               <form onSubmit={handleChangePassword} className="space-y-4">
                 <div>
-                  <Label htmlFor="current_password">Mot de passe actuel *</Label>
+                  <Label htmlFor="current_password">{t('profile.current.pwd')} *</Label>
                   <Input
                     id="current_password"
                     type="password"
@@ -244,7 +246,7 @@ const ProfilePage = () => {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="new_password">Nouveau mot de passe *</Label>
+                    <Label htmlFor="new_password">{t('profile.new.pwd')} *</Label>
                     <Input
                       id="new_password"
                       type="password"
@@ -257,7 +259,7 @@ const ProfilePage = () => {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="confirm_password">Confirmer *</Label>
+                    <Label htmlFor="confirm_password">{t('profile.confirm.pwd')} *</Label>
                     <Input
                       id="confirm_password"
                       type="password"
@@ -272,7 +274,7 @@ const ProfilePage = () => {
                 {passwordData.new_password &&
                   passwordData.confirm_password &&
                   passwordData.new_password !== passwordData.confirm_password && (
-                    <p className="text-sm text-red-500">Les mots de passe ne correspondent pas</p>
+                    <p className="text-sm text-red-500">{t('profile.pwd.mismatch')}</p>
                   )}
                 <div className="pt-2">
                   <Button
@@ -294,7 +296,7 @@ const ProfilePage = () => {
           {/* Zone danger */}
           <Card className="border-red-200">
             <CardHeader>
-              <CardTitle className="text-base text-red-700">Zone de danger</CardTitle>
+              <CardTitle className="text-base text-red-700">{t('profile.danger')}</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="flex items-center justify-between">
@@ -320,7 +322,7 @@ const ProfilePage = () => {
       <AlertDialog open={showLogoutDialog} onOpenChange={setShowLogoutDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Se déconnecter ?</AlertDialogTitle>
+            <AlertDialogTitle>{t('profile.logout.confirm')}</AlertDialogTitle>
             <AlertDialogDescription>
               Vous devrez vous reconnecter pour accéder à votre compte.
             </AlertDialogDescription>

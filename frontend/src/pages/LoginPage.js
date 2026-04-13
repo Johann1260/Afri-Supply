@@ -1,52 +1,41 @@
 import React, { useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Eye, EyeSlash, Storefront, User, Buildings } from '@phosphor-icons/react';
+import { Eye, EyeSlash, Storefront } from '@phosphor-icons/react';
 import { Layout } from '../components/layout';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { useAuth } from '../context/AuthContext';
+import { useLocale } from '../context/LocaleContext';
 import { toast } from 'sonner';
 
 const LoginPage = () => {
   const navigate = useNavigate();
   const { login } = useAuth();
+  const { t, locale } = useLocale();
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [formData, setFormData] = useState({
-    email: '',
-    password: '',
-  });
+  const [formData, setFormData] = useState({ email: '', password: '' });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-
     try {
       const user = await login(formData);
-      toast.success(`Bienvenue ${user.full_name}!`);
+      toast.success(locale === 'fr' ? `Bienvenue ${user.full_name}!` : `Welcome ${user.full_name}!`);
       navigate('/dashboard');
     } catch (error) {
-      const message =
-      error.response?.data?.detail?.[0]?.msg ||
-      error.response?.data?.detail ||
-      error.message ||
-      "Identifiants incorrects";
+      const raw = error.response?.data?.detail;
+      let message = locale === 'fr' ? 'Identifiants incorrects' : 'Invalid credentials';
+
+      if (typeof raw === 'string') message = raw;
+      else if (Array.isArray(raw)) message = raw[0]?.msg || message;
+      else if (raw?.msg) message = raw.msg;
 
       toast.error(message);
-    }
-    finally {
+    } finally {
       setLoading(false);
-    }
-  };
-
-  // Demo credentials
-  const fillDemo = (type) => {
-    if (type === 'supplier') {
-      setFormData({ email: 'supplier@afrisupply.com', password: 'supplier123' });
-    } else {
-      setFormData({ email: 'buyer@afrisupply.com', password: 'buyer123' });
     }
   };
 
@@ -58,7 +47,6 @@ const LoginPage = () => {
           animate={{ opacity: 1, y: 0 }}
           className="w-full max-w-md"
         >
-          {/* Logo */}
           <div className="text-center mb-8">
             <Link to="/" className="inline-flex items-center gap-2">
               <div className="w-12 h-12 bg-primary rounded-lg flex items-center justify-center">
@@ -70,44 +58,13 @@ const LoginPage = () => {
 
           <div className="bg-white border border-slate-200 rounded-lg p-8 shadow-sm">
             <h1 className="font-heading font-bold text-2xl text-center mb-2">
-              Connexion
+              {t('auth.login.title')}
             </h1>
-            <p className="text-slate-500 text-center mb-6">
-              Accédez à votre compte AfriSupply
-            </p>
-
-            {/* Demo accounts */}
-            {/* <div className="mb-6 p-4 bg-slate-50 rounded-lg">
-              <p className="text-sm text-slate-600 mb-3">Comptes de démonstration:</p>
-              <div className="flex gap-2">
-                <Button 
-                  type="button"
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => fillDemo('buyer')}
-                  className="flex-1"
-                  data-testid="demo-buyer"
-                >
-                  <User className="w-4 h-4 mr-1" />
-                  Acheteur
-                </Button>
-                <Button 
-                  type="button"
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => fillDemo('supplier')}
-                  className="flex-1"
-                  data-testid="demo-supplier"
-                >
-                  <Buildings className="w-4 h-4 mr-1" />
-                  Fournisseur
-                </Button>
-              </div>
-            </div> */}
+            <p className="text-slate-500 text-center mb-6">{t('auth.login.subtitle')}</p>
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">{t('auth.login.email')}</Label>
                 <Input
                   id="email"
                   type="email"
@@ -120,7 +77,7 @@ const LoginPage = () => {
               </div>
 
               <div>
-                <Label htmlFor="password">Mot de passe</Label>
+                <Label htmlFor="password">{t('auth.login.password')}</Label>
                 <div className="relative">
                   <Input
                     id="password"
@@ -145,27 +102,27 @@ const LoginPage = () => {
               <div className="flex items-center justify-between text-sm">
                 <label className="flex items-center gap-2">
                   <input type="checkbox" className="rounded border-slate-300" />
-                  <span className="text-slate-600">Se souvenir de moi</span>
+                  <span className="text-slate-600">{t('auth.login.remember')}</span>
                 </label>
                 <Link to="/forgot-password" className="text-accent hover:underline">
-                  Mot de passe oublié?
+                  {t('auth.login.forgot')}
                 </Link>
               </div>
 
-              <Button 
-                type="submit" 
+              <Button
+                type="submit"
                 className="w-full bg-accent hover:bg-accent-hover"
                 disabled={loading}
                 data-testid="login-submit"
               >
-                {loading ? 'Connexion...' : 'Se connecter'}
+                {loading ? t('auth.login.loading') : t('auth.login.submit')}
               </Button>
             </form>
 
             <p className="text-center text-sm text-slate-500 mt-6">
-              Pas encore de compte?{' '}
+              {t('auth.login.noAccount')}{' '}
               <Link to="/register" className="text-accent font-medium hover:underline">
-                S'inscrire
+                {t('auth.login.register')}
               </Link>
             </p>
           </div>

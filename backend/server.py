@@ -20,6 +20,24 @@ from fastapi import Form, File, UploadFile
 import shutil
 from uuid import uuid4
 
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
+# Sécurité — Rate limiting
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+
+# Sécurité — Sanitisation
+import re
+import html
+import secrets
+
+# Email
+import aiosmtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
 
 # ======================= CONFIG UPLOAD IMAGES =======================
 UPLOAD_DIR = Path("uploads/products")
@@ -35,11 +53,15 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
 # JWT Configuration
-JWT_SECRET = os.environ.get('JWT_SECRET', 'afrisupply_secret_key')
+JWT_SECRET = os.environ.get('JWT_SECRET')
+if not JWT_SECRET:
+    raise RuntimeError("JWT_SECRET environment variable is not set. Refusing to start.")
 JWT_ALGORITHM = os.environ.get('JWT_ALGORITHM', 'HS256')
-# ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get('ACCESS_TOKEN_EXPIRE_MINUTES', 1440))
-ACCESS_TOKEN_EXPIRE_MINUTES = 30      # Court pour forcer le refresh
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
 REFRESH_TOKEN_EXPIRE_DAYS = 7
+
+# Stripe — initialisation unique au démarrage
+stripe.api_key = os.environ.get("STRIPE_API_KEY", "")
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -58,7 +80,32 @@ api_router = APIRouter(prefix="/api")
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# ======================= RATE LIMITING =======================
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
+# ======================= UPLOADS DOCS =======================
+DOCS_UPLOAD_DIR = Path("uploads/documents")
+DOCS_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
 # ======================= MODELS =======================
+
+# Middleware sécurité headers (Starlette BaseHTTPMiddleware)
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=()"
+        # Ne pas exposer la version du serveur
+        if "server" in response.headers:
+            del response.headers["server"]
+        return response
 
 class UserBase(BaseModel):
     email: EmailStr
@@ -194,6 +241,9 @@ class OrderItemCreate(BaseModel):
 class OrderCreate(BaseModel):
     payment_method: str = "stripe"
     notes: Optional[str] = None
+    shipping_address: Optional[str] = None
+    shipping_city: Optional[str] = None
+    shipping_country: Optional[str] = None
 
 class OrderResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -208,7 +258,11 @@ class OrderResponse(BaseModel):
     total: float
     status: str
     payment_status: str
+    payment_method: Optional[str] = None
     notes: Optional[str] = None
+    shipping_address: Optional[str] = None
+    shipping_city: Optional[str] = None
+    shipping_country: Optional[str] = None
     created_at: str
 
 class ReviewCreate(BaseModel):
@@ -446,11 +500,102 @@ async def get_current_user_optional(credentials: Optional[HTTPAuthorizationCrede
         return user
     except JWTError:
         return None
+    
+
+# ======================= SANITISATION =======================
+
+def sanitize_string(value: str, max_length: int = 500) -> str:
+    """Supprime les balises HTML et limite la longueur."""
+    if not value:
+        return ""
+    clean = re.sub(r'<[^>]+>', '', str(value))
+    clean = html.unescape(clean)
+    return clean[:max_length].strip()
+
+def sanitize_user_input(data: dict) -> dict:
+    """Sanitise tous les champs string d'un dict."""
+    return {
+        k: sanitize_string(v) if isinstance(v, str) else v
+        for k, v in data.items()
+    }
+
+# ======================= EMAIL =======================
+
+EMAIL_HOST     = os.environ.get("EMAIL_HOST", "smtp.gmail.com")
+EMAIL_PORT     = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_USER     = os.environ.get("EMAIL_USER", "")
+EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD", "")
+EMAIL_FROM     = os.environ.get("EMAIL_FROM", "noreply@afrisupply.com")
+FRONTEND_URL   = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+
+async def send_email(to: str, subject: str, html_body: str):
+    """Envoie un email via SMTP. Silencieux si non configuré."""
+    if not EMAIL_USER or not EMAIL_PASSWORD:
+        logger.info(f"[EMAIL MOCK] To: {to} | Subject: {subject}")
+        return True
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"]    = EMAIL_FROM
+        msg["To"]      = to
+        msg.attach(MIMEText(html_body, "html"))
+        await aiosmtplib.send(
+            msg,
+            hostname=EMAIL_HOST,
+            port=EMAIL_PORT,
+            username=EMAIL_USER,
+            password=EMAIL_PASSWORD,
+            start_tls=True,
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Email send error: {e}")
+        return False
+
+def make_verification_email(name: str, link: str) -> str:
+    return f"""
+    <div style="font-family:sans-serif;max-width:600px;margin:auto;padding:32px">
+      <h2 style="color:#034168">Bienvenue sur AfriSupply, {name} !</h2>
+      <p>Cliquez sur le bouton ci-dessous pour confirmer votre adresse email :</p>
+      <a href="{link}" style="display:inline-block;background:#FF6A00;color:#fff;
+         padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:bold;margin:16px 0">
+        Confirmer mon email
+      </a>
+      <p style="color:#888;font-size:12px">Ce lien expire dans 24 heures.<br>
+      Si vous n'avez pas créé de compte AfriSupply, ignorez cet email.</p>
+    </div>
+    """
+
+def make_document_notification_email(company: str, user_email: str, doc_count: int) -> str:
+    return f"""
+    <div style="font-family:sans-serif;max-width:600px;margin:auto;padding:32px">
+      <h2 style="color:#034168">Nouveau fournisseur en attente de vérification</h2>
+      <p><strong>Entreprise :</strong> {company}<br>
+         <strong>Email :</strong> {user_email}<br>
+         <strong>Documents :</strong> {doc_count} fichier(s) soumis</p>
+      <p>Connectez-vous au panneau d'administration pour vérifier ce compte.</p>
+    </div>
+    """
+
+def make_account_approved_email(name: str) -> str:
+    return f"""
+    <div style="font-family:sans-serif;max-width:600px;margin:auto;padding:32px">
+      <h2 style="color:#034168">Votre compte fournisseur est activé !</h2>
+      <p>Bonjour {name},</p>
+      <p>Votre compte AfriSupply a été vérifié et activé. Vous pouvez maintenant vous connecter
+         et commencer à publier vos produits.</p>
+      <a href="{FRONTEND_URL}/login" style="display:inline-block;background:#FF6A00;color:#fff;
+         padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:bold;margin:16px 0">
+        Accéder à mon compte
+      </a>
+    </div>
+    """
 
 # ======================= AUTH ENDPOINTS =======================
 
 @api_router.post("/auth/register", response_model=TokenResponse)
-async def register(user_data: UserCreate):
+@limiter.limit("10/minute")      
+async def register(request: Request, user_data: UserCreate):
     existing = await db.users.find_one({"email": user_data.email})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -474,40 +619,124 @@ async def register(user_data: UserCreate):
     }
     
     await db.users.insert_one(user_doc)
+
+    # Envoyer email de vérification
+    token = secrets.token_urlsafe(32)
+    expires = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {
+            "email_verification_token": token,
+            "email_verification_expires": expires,
+            "email_verified": False,
+            "account_status": "pending_email"  # pending_email | pending_review | active
+        }}
+    )
+
+    link = f"{FRONTEND_URL}/verify-email?token={token}"
+    await send_email(
+        user_data.email,
+        "Confirmez votre email AfriSupply",
+        make_verification_email(user_data.full_name, link)
+    )
+
+    access_token_val = create_access_token({"sub": user_id})
+    refresh_token_val = create_refresh_token({"sub": user_id})
     
-    token = create_access_token({"sub": user_id})
     user_response = UserResponse(
         id=user_id, email=user_data.email, full_name=user_data.full_name,
         company_name=user_data.company_name, phone=user_data.phone,
         country=user_data.country, city=user_data.city,
         user_type=user_data.user_type, created_at=now
     )
-    return TokenResponse(access_token=token, user=user_response)
+    return {
+        "access_token": access_token_val,
+        "refresh_token": refresh_token_val,
+        "token_type": "bearer",
+        "user": user_response
+    }
 
 @api_router.post("/auth/login", response_model=TokenResponse)
-async def login(credentials: UserLogin):
-    user = await db.users.find_one({"email": credentials.email}, {"_id": 0})
-    if not user or not verify_password(credentials.password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-    
+@limiter.limit("10/minute")      
+async def login(request: Request, credentials: UserLogin):
+    # Récupérer l'utilisateur avec les champs nécessaires
+    user = await db.users.find_one(
+        {"email": credentials.email},
+        {
+            "_id": 0,
+            "id": 1,
+            "email": 1,
+            "full_name": 1,
+            "company_name": 1,
+            "phone": 1,
+            "country": 1,
+            "city": 1,
+            "user_type": 1,
+            "created_at": 1,
+            "password_hash": 1,          # nécessaire pour la vérification
+            "email_verified": 1,
+            "account_status": 1
+        }
+    )
+
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Email ou mot de passe invalide"
+        )
+
+    # Vérification du mot de passe
+    if not verify_password(credentials.password, user["password_hash"]):
+        raise HTTPException(
+            status_code=401,
+            detail="Email ou mot de passe invalide"
+        )
+
+    # === Vérifications de statut du compte (avant de générer les tokens) ===
+    account_status = user.get("account_status", "active")
+    email_verified = user.get("email_verified", True)  # True par défaut pour anciens comptes
+
+    # Pour les buyers (ou tous les utilisateurs) : email confirmé
+    if not email_verified and account_status == "pending_email":
+        raise HTTPException(
+            status_code=403,
+            detail="Veuillez confirmer votre email avant de vous connecter. Vérifiez vos emails."
+        )
+
+    # Pour les suppliers : approbation manuelle
+    if user.get("user_type") == "supplier" and account_status == "pending_review":
+        raise HTTPException(
+            status_code=403,
+            detail="Votre compte est en cours de vérification (délai : 48h). Vous recevrez un email à l'activation."
+        )
+
+    # Optionnel : bloquer les comptes inactifs/suspendus
+    if account_status in ["inactive", "suspended", "banned"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Votre compte est désactivé. Contactez le support."
+        )
+
+    # === Tout est OK → générer les tokens ===
     access_token = create_access_token({"sub": user["id"]})
     refresh_token = create_refresh_token({"sub": user["id"]})
-    
+
+    # Construire la réponse utilisateur (sans password_hash)
     user_response = UserResponse(
-        id=user["id"], 
-        email=user["email"], 
+        id=user["id"],
+        email=user["email"],
         full_name=user["full_name"],
-        company_name=user.get("company_name"), 
+        company_name=user.get("company_name"),
         phone=user.get("phone"),
-        country=user.get("country"), 
+        country=user.get("country"),
         city=user.get("city"),
-        user_type=user["user_type"], 
+        user_type=user["user_type"],
         created_at=user["created_at"]
     )
-    
+
     return {
         "access_token": access_token,
-        "refresh_token": refresh_token,   # ← AJOUTÉ
+        "refresh_token": refresh_token,
         "token_type": "bearer",
         "user": user_response
     }
@@ -547,6 +776,244 @@ async def get_me(current_user: dict = Depends(get_current_user)):
         created_at=current_user["created_at"]
     )
 
+@api_router.put("/auth/me", response_model=UserResponse)
+async def update_me(data: dict, current_user: dict = Depends(get_current_user)):
+    allowed = ["full_name", "company_name", "phone", "city", "country"]
+    update = {k: sanitize_string(str(v)) for k, v in data.items() if k in allowed and v is not None}
+    if not update:
+        raise HTTPException(status_code=400, detail="Aucun champ valide à mettre à jour")
+    await db.users.update_one({"id": current_user["id"]}, {"$set": update})
+    merged = {**current_user, **update}
+    return UserResponse(
+        id=merged["id"], email=merged["email"],
+        full_name=merged["full_name"],
+        company_name=merged.get("company_name"),
+        phone=merged.get("phone"), country=merged.get("country"),
+        city=merged.get("city"), user_type=merged["user_type"],
+        created_at=merged["created_at"]
+    )
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str
+
+@api_router.put("/auth/password")
+async def change_password(data: PasswordChange, current_user: dict = Depends(get_current_user)):
+    if len(data.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Le mot de passe doit contenir au moins 8 caractères")
+    # Re-fetch user with password_hash
+    user = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    if not verify_password(data.current_password, user["password_hash"]):
+        raise HTTPException(status_code=400, detail="Mot de passe actuel incorrect")
+    await db.users.update_one(
+        {"id": current_user["id"]},
+        {"$set": {"password_hash": get_password_hash(data.new_password)}}
+    )
+    return {"message": "Mot de passe modifié avec succès"}
+
+# ======================= VÉRIFICATION EMAIL =======================
+
+@api_router.post("/auth/resend-verification")
+@limiter.limit("3/minute")
+async def resend_verification(request: Request, data: dict):
+    email = data.get("email", "").strip().lower()
+    user = await db.users.find_one({"email": email}, {"_id": 0})
+    # Réponse identique qu'on trouve l'user ou pas (sécurité anti-enumeration)
+    if user and not user.get("email_verified"):
+        token = secrets.token_urlsafe(32)
+        expires = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+        await db.users.update_one(
+            {"email": email},
+            {"$set": {"email_verification_token": token, "email_verification_expires": expires}}
+        )
+        link = f"{FRONTEND_URL}/verify-email?token={token}"
+        await send_email(
+            email,
+            "Confirmez votre email AfriSupply",
+            make_verification_email(user.get("full_name", ""), link)
+        )
+    return {"message": "Si l'email existe, un lien a été envoyé."}
+
+@api_router.get("/auth/verify-email")
+async def verify_email(token: str):
+    user = await db.users.find_one(
+        {"email_verification_token": token},
+        {"_id": 0}
+    )
+    if not user:
+        raise HTTPException(status_code=400, detail="Lien invalide ou expiré")
+    
+    # Vérifier l'expiration
+    expires = user.get("email_verification_expires")
+    if expires and datetime.fromisoformat(expires) < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Lien expiré")
+    
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"email_verified": True}, "$unset": {"email_verification_token": "", "email_verification_expires": ""}}
+    )
+    return {"message": "Email vérifié avec succès"}
+
+# ======================= UPLOAD DOCUMENTS ENTREPRISE =======================
+
+@api_router.post("/auth/documents/{user_id}")
+@limiter.limit("5/minute")
+async def upload_company_documents(
+    request: Request,
+    user_id: str,
+    documents: List[UploadFile] = File(...),
+    current_user: dict = Depends(get_current_user)
+):
+    # Seul l'utilisateur lui-même peut uploader ses docs
+    if current_user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Accès refusé")
+    
+    if len(documents) > 10:
+        raise HTTPException(status_code=400, detail="Maximum 10 documents")
+    
+    allowed_types = {"application/pdf", "image/jpeg", "image/png", "image/jpg"}
+    saved_paths = []
+    
+    for doc in documents:
+        # Vérifier type MIME
+        if doc.content_type not in allowed_types:
+            raise HTTPException(status_code=400, detail=f"Type non autorisé: {doc.content_type}")
+        
+        # Vérifier taille (10 Mo max)
+        content = await doc.read()
+        if len(content) > 10 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail=f"{doc.filename} dépasse 10 Mo")
+        
+        # Sauvegarder avec nom sécurisé
+        ext = Path(doc.filename or "doc.pdf").suffix.lower()
+        if ext not in [".pdf", ".jpg", ".jpeg", ".png"]:
+            ext = ".pdf"
+        
+        safe_name = f"{user_id}_{uuid.uuid4()}{ext}"
+        file_path = DOCS_UPLOAD_DIR / safe_name
+        
+        with open(file_path, "wb") as f:
+            f.write(content)
+        
+        saved_paths.append(f"/uploads/documents/{safe_name}")
+    
+    # Mettre à jour le compte : en attente de vérification admin
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {
+            "company_documents": saved_paths,
+            "account_status": "pending_review",
+            "documents_submitted_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    # Notifier les admins
+    admin_email = os.environ.get("ADMIN_EMAIL", "admin@afrisupply.com")
+    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    await send_email(
+        admin_email,
+        f"Nouveau fournisseur à vérifier — {user.get('company_name', 'N/A')}",
+        make_document_notification_email(
+            user.get("company_name", "N/A"),
+            user.get("email", ""),
+            len(saved_paths)
+        )
+    )
+    
+    return {"message": "Documents soumis avec succès", "count": len(saved_paths)}
+
+# ======================= MOT DE PASSE OUBLIÉ =======================
+
+@api_router.post("/auth/forgot-password")
+@limiter.limit("3/minute")
+async def forgot_password(request: Request, data: dict):
+    email = data.get("email", "").strip().lower()
+    user = await db.users.find_one({"email": email}, {"_id": 0})
+    # Toujours répondre 200 (anti-enumeration)
+    if user:
+        token = secrets.token_urlsafe(32)
+        expires = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+        await db.users.update_one(
+            {"email": email},
+            {"$set": {"password_reset_token": token, "password_reset_expires": expires}}
+        )
+        link = f"{FRONTEND_URL}/reset-password?token={token}"
+        html_body = f"""
+        <div style="font-family:sans-serif;max-width:600px;margin:auto;padding:32px">
+          <h2 style="color:#034168">Réinitialisation de mot de passe</h2>
+          <p>Cliquez sur le lien ci-dessous pour réinitialiser votre mot de passe :</p>
+          <a href="{link}" style="display:inline-block;background:#FF6A00;color:#fff;
+             padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:bold;margin:16px 0">
+            Réinitialiser mon mot de passe
+          </a>
+          <p style="color:#888;font-size:12px">Ce lien expire dans 2 heures.</p>
+        </div>
+        """
+        await send_email(email, "Réinitialisation de votre mot de passe AfriSupply", html_body)
+    return {"message": "Si l'email existe, un lien a été envoyé."}
+
+@api_router.post("/auth/reset-password")
+@limiter.limit("5/minute")
+async def reset_password(request: Request, data: dict):
+    token = data.get("token", "")
+    new_password = data.get("password", "")
+    
+    if len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="Mot de passe trop court (min 8 caractères)")
+    
+    user = await db.users.find_one({"password_reset_token": token}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=400, detail="Token invalide")
+    
+    expires = user.get("password_reset_expires")
+    if expires and datetime.fromisoformat(expires) < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Token expiré")
+    
+    await db.users.update_one(
+        {"id": user["id"]},
+        {
+            "$set": {"password_hash": get_password_hash(new_password)},
+            "$unset": {"password_reset_token": "", "password_reset_expires": ""}
+        }
+    )
+    return {"message": "Mot de passe réinitialisé avec succès"}
+
+# ======================= APPROBATION COMPTE (admin) =======================
+
+@api_router.post("/admin/approve-supplier/{user_id}")
+async def approve_supplier(user_id: str, current_user: dict = Depends(get_current_user)):
+    if current_user.get("user_type") != "admin":
+        raise HTTPException(status_code=403, detail="Accès réservé aux admins")
+    
+    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
+    
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {
+            "account_status": "active",
+            "email_verified": True,
+            "approved_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    await send_email(
+        user["email"],
+        "Votre compte fournisseur AfriSupply est activé !",
+        make_account_approved_email(user["full_name"])
+    )
+    
+    await create_notification(
+        user_id=user_id,
+        type="system",
+        title="Compte activé",
+        message="Votre compte fournisseur a été vérifié et activé. Bienvenue sur AfriSupply !",
+        related_id=None
+    )
+    
+    return {"message": "Compte approuvé"}
+
 # ======================= CATEGORIES ENDPOINTS =======================
 
 @api_router.get("/categories", response_model=List[CategoryResponse])
@@ -565,7 +1032,9 @@ async def create_category(category: CategoryCreate, current_user: dict = Depends
 
 
 @api_router.get("/products", response_model=List[ProductResponse])
+@limiter.limit("100/minute")
 async def get_products(
+    request: Request,
     category_id: Optional[str] = None,
     supplier_id: Optional[str] = None,
     search: Optional[str] = None,
@@ -610,7 +1079,8 @@ async def get_products(
     return products
 
 @api_router.get("/products/popular", response_model=List[ProductResponse])
-async def get_popular_products(limit: int = 8):
+@limiter.limit("100/minute")
+async def get_popular_products(request: Request, limit: int = 8):
     products = await db.products.find(
         {"is_available": True}, 
         {"_id": 0}
@@ -631,7 +1101,8 @@ async def get_popular_products(limit: int = 8):
     return products
 
 @api_router.get("/products/recommendations", response_model=List[ProductResponse])
-async def get_recommendations(current_user: dict = Depends(get_current_user)):
+@limiter.limit("100/minute")
+async def get_recommendations(request: Request, current_user: dict = Depends(get_current_user)):
     """AI-powered product recommendations based on user history"""
     try:
         viewed = current_user.get("viewed_products", [])[-10:]
@@ -680,7 +1151,8 @@ async def get_recommendations(current_user: dict = Depends(get_current_user)):
         return products
 
 @api_router.get("/products/{product_id}", response_model=ProductResponse)
-async def get_product(product_id: str, current_user: dict = Depends(get_current_user_optional)):
+@limiter.limit("100/minute")
+async def get_product(request: Request, product_id: str, current_user: dict = Depends(get_current_user_optional)):
     product = await db.products.find_one({"id": product_id}, {"_id": 0})
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
@@ -703,7 +1175,9 @@ async def get_product(product_id: str, current_user: dict = Depends(get_current_
 # ======================= PRODUCTS ENDPOINTS =======================
 # ======================= CREATE PRODUCT =======================
 @api_router.post("/products", response_model=ProductResponse)
+@limiter.limit("20/minute")
 async def create_product(
+    request: Request,
     name: str = Form(...),
     description: str = Form(""),
     price: float = Form(...),
@@ -768,7 +1242,9 @@ async def create_product(
 
 # ======================= UPDATE PRODUCT =======================
 @api_router.put("/products/{product_id}", response_model=ProductResponse)
+@limiter.limit("20/minute")
 async def update_product(
+    request: Request,
     product_id: str,
     name: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
@@ -851,7 +1327,8 @@ async def update_product(
     return ProductResponse(**updated)
 
 @api_router.delete("/products/{product_id}")
-async def delete_product(product_id: str, current_user: dict = Depends(get_current_user)):
+@limiter.limit("20/minute")
+async def delete_product(request: Request, product_id: str, current_user: dict = Depends(get_current_user)):
     existing = await db.products.find_one({"id": product_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Product not found")
@@ -862,7 +1339,8 @@ async def delete_product(product_id: str, current_user: dict = Depends(get_curre
     return {"message": "Product deleted"}
 
 @api_router.get("/supplier/products", response_model=List[ProductResponse])
-async def get_supplier_products(current_user: dict = Depends(get_current_user)):
+@limiter.limit("100/minute")
+async def get_supplier_products(request: Request, current_user: dict = Depends(get_current_user)):
     if current_user.get("user_type") != "supplier":
         raise HTTPException(status_code=403, detail="Only suppliers can access this")
     
@@ -1016,6 +1494,8 @@ async def create_orders(order_data: OrderCreate, current_user: dict = Depends(ge
     now = datetime.now(timezone.utc).isoformat()
     
     for supplier_id, items in supplier_items.items():
+        if not items:  # skip if all products were missing from DB
+            continue
         supplier = await db.users.find_one({"id": supplier_id}, {"_id": 0})
         subtotal = sum(item["subtotal"] for item in items)
         
@@ -1036,6 +1516,9 @@ async def create_orders(order_data: OrderCreate, current_user: dict = Depends(ge
             "payment_status": "pending",
             "payment_method": order_data.payment_method,
             "notes": order_data.notes,
+            "shipping_address": order_data.shipping_address,
+            "shipping_city": order_data.shipping_city,
+            "shipping_country": order_data.shipping_country,
             "created_at": now
         }
         
@@ -1048,9 +1531,9 @@ async def create_orders(order_data: OrderCreate, current_user: dict = Depends(ge
     return orders
 
 @api_router.get("/orders", response_model=List[OrderResponse])
-async def get_orders(current_user: dict = Depends(get_current_user)):
+async def get_orders(current_user: dict = Depends(get_current_user), skip: int = 0, limit: int = 50):
     query = {"$or": [{"buyer_id": current_user["id"]}, {"supplier_id": current_user["id"]}]}
-    orders = await db.orders.find(query, {"_id": 0}).sort("created_at", -1).to_list(100)
+    orders = await db.orders.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
     return orders
 
 @api_router.get("/orders/{order_id}", response_model=OrderResponse)
@@ -1080,6 +1563,7 @@ async def update_order_status(order_id: str, status: str, current_user: dict = D
 # ======================= PAYMENT ENDPOINTS =======================
 
 @api_router.post("/checkout/session")
+@limiter.limit("10/minute")      
 async def create_checkout_session(request: CheckoutRequest, http_request: Request, current_user: dict = Depends(get_current_user)):
     cart = await db.carts.find_one({"user_id": current_user["id"]}, {"_id": 0})
     if not cart or not cart.get("items"):
@@ -1092,7 +1576,6 @@ async def create_checkout_session(request: CheckoutRequest, http_request: Reques
     
     total_usd = round(total / 600, 2)  # Conversion XAF to USD
     
-    stripe.api_key = os.environ.get("STRIPE_API_KEY")
     host_url = str(http_request.base_url).rstrip("/")
     session = stripe.checkout.Session.create(
         payment_method_types=["card"],
@@ -1124,7 +1607,6 @@ async def create_checkout_session(request: CheckoutRequest, http_request: Reques
 
 @api_router.get("/checkout/status/{session_id}", response_model=PaymentStatusResponse)
 async def get_checkout_status(session_id: str, current_user: dict = Depends(get_current_user)):
-    stripe.api_key = os.environ.get("STRIPE_API_KEY")
     session = stripe.checkout.Session.retrieve(session_id, expand=["payment_intent"])
     payment_status = session.payment_status or session.status
     if payment_status == "paid":
@@ -1135,6 +1617,7 @@ async def get_checkout_status(session_id: str, current_user: dict = Depends(get_
     return PaymentStatusResponse(status=session.status, payment_status=payment_status, order_id=None)
 
 @api_router.post("/webhook/stripe")
+@limiter.limit("5/minute")      
 async def stripe_webhook(request: Request):
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature")
@@ -1159,41 +1642,9 @@ async def stripe_webhook(request: Request):
 
 # ======================= REVIEWS ENDPOINTS =======================
 
-@api_router.post("/reviews", response_model=ReviewResponse)
-async def create_review(review: ReviewCreate, current_user: dict = Depends(get_current_user)):
-    # Verify order exists and belongs to user
-    order = await db.orders.find_one({"id": review.order_id, "buyer_id": current_user["id"]}, {"_id": 0})
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-    
-    review_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
-    
-    review_doc = {
-        "id": review_id,
-        "product_id": review.product_id,
-        "order_id": review.order_id,
-        "user_id": current_user["id"],
-        "user_name": current_user["full_name"],
-        "rating": review.rating,
-        "comment": review.comment,
-        "created_at": now
-    }
-    
-    await db.reviews.insert_one(review_doc)
-    
-    # Update product rating
-    reviews = await db.reviews.find({"product_id": review.product_id}, {"_id": 0}).to_list(1000)
-    avg_rating = sum(r["rating"] for r in reviews) / len(reviews)
-    await db.products.update_one(
-        {"id": review.product_id},
-        {"$set": {"rating": round(avg_rating, 1), "review_count": len(reviews)}}
-    )
-    
-    return ReviewResponse(**review_doc)
-
 @api_router.get("/products/{product_id}/reviews", response_model=List[ReviewResponse])
-async def get_product_reviews(product_id: str):
+@limiter.limit("100/minute")
+async def get_product_reviews(request: Request, product_id: str):
     reviews = await db.reviews.find({"product_id": product_id}, {"_id": 0}).sort("created_at", -1).to_list(100)
     return reviews
 
@@ -1677,6 +2128,7 @@ async def reject_quote(rfq_id: str, current_user: dict = Depends(get_current_use
 # ======================= MOBILE MONEY ENDPOINTS =======================
 
 @api_router.post("/checkout/mobile-money", response_model=MobileMoneyPaymentResponse)
+@limiter.limit("5/minute")      
 async def create_mobile_money_payment(
     request: MobileMoneyPaymentRequest, 
     current_user: dict = Depends(get_current_user)
@@ -1986,7 +2438,9 @@ async def health():
 
 @api_router.post("/seed")
 async def seed_data():
-    """Seed initial categories and sample data"""
+    """Seed initial categories and sample data — disabled in production"""
+    if os.environ.get("ENVIRONMENT", "development").lower() == "production":
+        raise HTTPException(status_code=403, detail="Seed disabled in production")
     
     # Check if already seeded — on vérifie les PRODUITS au lieu des catégories
     existing = await db.products.count_documents({})
@@ -2209,13 +2663,42 @@ async def seed_data():
 # Include the router in the main app
 app.include_router(api_router)
 
+# ======================= MIDDLEWARES SÉCURITÉ =======================
+
+# CORS — restreindre aux origines connues en production
+ALLOWED_ORIGINS = os.environ.get(
+    "ALLOWED_ORIGINS",
+    "http://localhost:3001,http://192.168.56.1:3001,https://afri-supply-production.up.railway.app, https://www.afrisupply.com"
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With", "X-Client-Version"],
+    expose_headers=["X-RateLimit-Limit", "X-RateLimit-Remaining"],
+    max_age=600,
 )
+
+app.add_middleware(SecurityHeadersMiddleware)
+
+@app.on_event("startup")
+async def startup_db_indexes():
+    """Créer les index MongoDB au démarrage pour optimiser les performances."""
+    await db.products.create_index([("is_available", 1), ("rating", -1)])
+    await db.products.create_index([("category_id", 1)])
+    await db.products.create_index([("supplier_id", 1)])
+    await db.products.create_index([("created_at", -1)])
+    await db.products.create_index([("name", "text"), ("name_en", "text"), ("description", "text")])
+    await db.orders.create_index([("buyer_id", 1), ("created_at", -1)])
+    await db.orders.create_index([("supplier_id", 1), ("created_at", -1)])
+    await db.orders.create_index([("status", 1)])
+    await db.notifications.create_index([("user_id", 1), ("is_read", 1)])
+    await db.messages.create_index([("sender_id", 1), ("receiver_id", 1), ("created_at", 1)])
+    await db.reviews.create_index([("product_id", 1)])
+    await db.rfqs.create_index([("buyer_id", 1), ("supplier_id", 1)])
+    logger.info("MongoDB indexes created.")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

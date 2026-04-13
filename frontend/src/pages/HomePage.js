@@ -18,9 +18,11 @@ import { ProductGrid } from '../components/products';
 import { Button } from '../components/ui/button';
 import { categoriesAPI, productsAPI, seedAPI } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
+import { useLocale } from '../context/LocaleContext';
 
 const HomePage = () => {
   const { isAuthenticated } = useAuth();
+  const { t } = useLocale();
   const [categories, setCategories] = useState([]);
   const [popularProducts, setPopularProducts] = useState([]);
   // P4-20: recommandations IA
@@ -76,10 +78,10 @@ const HomePage = () => {
   };
 
   const stats = [
-    { label: 'Fournisseurs actifs', value: '500+', icon: Users },
-    { label: 'Produits disponibles', value: '10K+', icon: Buildings },
-    { label: 'Transactions réussies', value: '25K+', icon: TrendUp },
-    { label: 'Pays couverts', value: '6', icon: Truck },
+    { label: t('home.stats.suppliers'), value: '500+', icon: Users },
+    { label: t('home.stats.products'), value: '10K+', icon: Buildings },
+    { label: t('home.stats.transactions'), value: '25K+', icon: TrendUp },
+    { label: t('home.stats.countries'), value: '6', icon: Truck },
   ];
 
   const benefits = [
@@ -118,7 +120,7 @@ const HomePage = () => {
                 Zone CEMAC
               </span>
               <h1 className="font-heading font-black text-4xl sm:text-5xl lg:text-6xl text-white leading-tight mb-6">
-                La marketplace B2B industrielle pour
+                {t('home.hero.title').split(' pour')[0]} pour
                 <span className="text-accent"> l'Afrique centrale</span>
               </h1>
               <p className="text-lg text-white/80 mb-8 max-w-xl">
@@ -166,11 +168,11 @@ const HomePage = () => {
               <div>
                 <div className="flex items-center gap-2 mb-2">
                   <Sparkle className="w-5 h-5 text-accent" weight="fill" />
-                  <p className="overline text-accent">RECOMMANDÉ POUR VOUS</p>
+                  <p className="overline text-accent">{t('home.reco.label')}</p>
                 </div>
-                <h2 className="section-heading">Sélectionnés par notre IA</h2>
+                <h2 className="section-heading">{t('home.reco.title')}</h2>
                 <p className="text-slate-500 mt-1 text-sm">
-                  Basé sur vos recherches et favoris récents
+                  {t('home.reco.subtitle')}
                 </p>
               </div>
               <Link
@@ -192,7 +194,7 @@ const HomePage = () => {
           <div className="flex justify-between items-end mb-10">
             <div>
               <p className="overline text-accent mb-2">CATÉGORIES</p>
-              <h2 className="section-heading">Nos secteurs industriels</h2>
+              <h2 className="section-heading">{t('home.categories.title')}</h2>
             </div>
             <Link to="/categories" className="hidden sm:flex items-center gap-2 text-primary font-medium hover:text-accent transition-colors">
               Voir tout <ArrowRight className="w-4 h-4" />
@@ -238,7 +240,7 @@ const HomePage = () => {
           <div className="flex justify-between items-end mb-10">
             <div>
               <p className="overline text-accent mb-2">PRODUITS POPULAIRES</p>
-              <h2 className="section-heading">Les plus demandés</h2>
+              <h2 className="section-heading">{t('home.popular.title')}</h2>
             </div>
             <Link to="/products" className="hidden sm:flex items-center gap-2 text-primary font-medium hover:text-accent transition-colors">
               Voir tout <ArrowRight className="w-4 h-4" />
@@ -253,7 +255,7 @@ const HomePage = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-12">
             <p className="overline text-accent mb-2">POURQUOI NOUS CHOISIR</p>
-            <h2 className="section-heading">Votre partenaire industriel de confiance</h2>
+            <h2 className="section-heading">{t('home.benefits.title')}</h2>
           </div>
           <div className="grid md:grid-cols-3 gap-8">
             {benefits.map((benefit, i) => (
@@ -280,10 +282,10 @@ const HomePage = () => {
       <section className="py-16 lg:py-24 bg-primary">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <h2 className="font-heading font-bold text-3xl lg:text-4xl text-white mb-6">
-            Prêt à développer votre activité en Afrique centrale ?
+            {t('home.cta.title')}
           </h2>
           <p className="text-lg text-white/80 mb-8">
-            Rejoignez des centaines de fournisseurs et acheteurs industriels sur AfriSupply.
+            {t('home.cta.subtitle')}
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link to="/register?type=supplier">

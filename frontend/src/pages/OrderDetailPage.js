@@ -24,6 +24,7 @@ import {
   DialogDescription,
 } from '../components/ui/dialog';
 import { ordersAPI, supplierAPI } from '../lib/api';
+import { useLocale } from '../context/LocaleContext';
 import { formatPrice, formatDate, getStatusColor, getStatusLabel, getImageUrl } from '../lib/utils';
 import { toast } from 'sonner';
 
@@ -79,6 +80,7 @@ const StatusTimeline = ({ currentStatus }) => {
 };
 
 const OrderDetailPage = () => {
+  const { t } = useLocale();
   const { id } = useParams();
   const navigate = useNavigate();
   const [order, setOrder] = useState(null);
@@ -289,11 +291,11 @@ const OrderDetailPage = () => {
               </h2>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between text-slate-600">
-                  <span>Sous-total</span>
+                  <span>{t('orders.detail.subtotal')}</span>
                   <span>{formatPrice(order.subtotal)}</span>
                 </div>
                 <div className="border-t pt-2 flex justify-between font-heading font-bold text-base">
-                  <span>Total</span>
+                  <span>{t('orders.detail.total')}</span>
                   <span className="text-primary">{formatPrice(order.total)}</span>
                 </div>
               </div>
@@ -303,14 +305,14 @@ const OrderDetailPage = () => {
             <div className="bg-white border border-slate-200 rounded-xl p-5">
               <div className="flex items-center gap-2 mb-3">
                 <Truck className="w-4 h-4 text-slate-400" />
-                <h2 className="font-semibold text-sm text-slate-700">Fournisseur</h2>
+                <h2 className="font-semibold text-sm text-slate-700">{t('orders.detail.supplier')}</h2>
               </div>
               <p className="text-sm font-medium text-slate-900">{order.supplier_name}</p>
               <Link
                 to={`/messages`}
                 className="text-xs text-accent hover:underline mt-1 block"
               >
-                Contacter le fournisseur →
+                {t('orders.detail.contact')}
               </Link>
               {/* P3-14: bouton évaluation fournisseur visible uniquement si commande livrée */}
               {order.status === 'delivered' && (
@@ -322,7 +324,7 @@ const OrderDetailPage = () => {
                   disabled={alreadyRated}
                 >
                   <Star className="w-3.5 h-3.5 mr-1.5" weight={alreadyRated ? 'fill' : 'regular'} />
-                  {alreadyRated ? 'Fournisseur noté' : 'Évaluer le fournisseur'}
+                  {alreadyRated ? t('orders.rate.done') : t('orders.rate.title')}
                 </Button>
               )}
             </div>
@@ -331,7 +333,7 @@ const OrderDetailPage = () => {
             <div className="bg-white border border-slate-200 rounded-xl p-5">
               <div className="flex items-center gap-2 mb-3">
                 <CreditCard className="w-4 h-4 text-slate-400" />
-                <h2 className="font-semibold text-sm text-slate-700">Paiement</h2>
+                <h2 className="font-semibold text-sm text-slate-700">{t('orders.detail.payment')}</h2>
               </div>
               <p className="text-sm text-slate-600 capitalize">
                 {order.payment_method === 'stripe' ? 'Carte bancaire' : 'Mobile Money'}
@@ -355,11 +357,11 @@ const OrderDetailPage = () => {
               </Button>
             )}
           </div>
+        </div>
       </div>
-    </div>
 
-    {/* P3-14: Dialog notation fournisseur */}
-    <Dialog open={ratingDialogOpen} onOpenChange={setRatingDialogOpen}>
+      {/* P3-14: Dialog notation fournisseur */}
+      <Dialog open={ratingDialogOpen} onOpenChange={setRatingDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Évaluer {order?.supplier_name}</DialogTitle>
@@ -388,7 +390,7 @@ const OrderDetailPage = () => {
               />
             </div>
             <div>
-              <Label htmlFor="supplier-comment">Commentaire (optionnel)</Label>
+              <Label htmlFor="supplier-comment">{t('orders.rate.comment')}</Label>
               <Textarea
                 id="supplier-comment"
                 value={supplierRatingData.comment}
@@ -424,7 +426,7 @@ const OrderDetailPage = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </Layout>
+      </Layout>
   );
 };
 

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { useLocale } from '../context/LocaleContext';
 import { ArrowLeft } from '@phosphor-icons/react';
 import { Layout } from '../components/layout';
 
@@ -164,6 +165,7 @@ const BACK_LABELS = {
 // ─── Composant ──────────────────────────────────────────────────────────────
 
 const LegalPage = () => {
+  const { locale } = useLocale();
   // Dériver le type depuis le pathname (terms, privacy, legal)
   const pathname = window.location.pathname.replace('/', '');
   const type = Object.keys(PAGES).find((k) => pathname.includes(k)) || 'terms';
@@ -174,11 +176,11 @@ const LegalPage = () => {
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-10">
         {/* Back */}
         <Link
-          to="/register"
+          to="/"
           className="inline-flex items-center gap-2 text-slate-500 hover:text-primary text-sm mb-8 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
-          Retour à l'inscription
+          Retour à l'accueil
         </Link>
 
         {/* Header */}

@@ -30,6 +30,7 @@ import {
 } from '../components/ui/dialog';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
+import { useLocale } from '../context/LocaleContext';
 import { ordersAPI, paymentAPI, mobileMoneyAPI } from '../lib/api';
 import { formatPrice, getImageUrl } from '../lib/utils';
 import { toast } from 'sonner';
@@ -49,6 +50,7 @@ const CheckoutPage = () => {
   const [searchParams] = useSearchParams();
   const { cart, refreshCart } = useCart();
   const { user, isAuthenticated } = useAuth();
+  const { t } = useLocale();
   const [loading, setLoading] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState(null);
   const [mobileMoneyDialogOpen, setMobileMoneyDialogOpen] = useState(false);
@@ -120,15 +122,15 @@ const CheckoutPage = () => {
     e.preventDefault();
 
     if (!formData.shipping_address.trim()) {
-      toast.error('Veuillez entrer votre adresse de livraison');
+      toast.error(t('checkout.err.address'));
       return;
     }
     if (!formData.shipping_city.trim()) {
-      toast.error('Veuillez entrer votre ville');
+      toast.error(t('checkout.err.city'));
       return;
     }
     if (!formData.shipping_country) {
-      toast.error('Veuillez sélectionner votre pays');
+      toast.error(t('checkout.err.country'));
       return;
     }
 
@@ -191,7 +193,7 @@ const CheckoutPage = () => {
       <Layout>
         <div className="max-w-md mx-auto px-4 py-20 text-center">
           <Spinner className="w-12 h-12 mx-auto text-accent animate-spin mb-4" />
-          <h1 className="font-heading font-bold text-2xl mb-2">Vérification du paiement...</h1>
+          <h1 className="font-heading font-bold text-2xl mb-2">{t('checkout.checking')}</h1>
           <p className="text-slate-500">Veuillez patienter</p>
         </div>
       </Layout>
@@ -205,7 +207,7 @@ const CheckoutPage = () => {
           <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
             <CheckCircle className="w-10 h-10 text-green-600" weight="fill" />
           </div>
-          <h1 className="font-heading font-bold text-2xl mb-2">Paiement réussi!</h1>
+          <h1 className="font-heading font-bold text-2xl mb-2">{t('checkout.success.title')}</h1>
           <p className="text-slate-500 mb-6">
             Votre commande a été confirmée. Vous recevrez un email de confirmation.
           </p>
@@ -228,7 +230,7 @@ const CheckoutPage = () => {
           <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
             <XCircle className="w-10 h-10 text-red-600" weight="fill" />
           </div>
-          <h1 className="font-heading font-bold text-2xl mb-2">Paiement échoué</h1>
+          <h1 className="font-heading font-bold text-2xl mb-2">{t('checkout.failed.title')}</h1>
           <p className="text-slate-500 mb-6">
             Une erreur est survenue lors du paiement. Veuillez réessayer.
           </p>
@@ -251,7 +253,7 @@ const CheckoutPage = () => {
   return (
     <Layout>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <h1 className="section-heading mb-8">Finaliser la commande</h1>
+        <h1 className="section-heading mb-8">{t('checkout.title')}</h1>
 
         <div className="grid lg:grid-cols-3 gap-8">
           {/* Checkout form */}
@@ -264,12 +266,12 @@ const CheckoutPage = () => {
                   <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
                     <MapPin className="w-5 h-5 text-primary" />
                   </div>
-                  <h2 className="font-heading font-bold text-lg">Adresse de livraison</h2>
+                  <h2 className="font-heading font-bold text-lg">{t('checkout.address')}</h2>
                 </div>
 
                 <div className="space-y-4">
                   <div>
-                    <Label htmlFor="shipping_address">Adresse *</Label>
+                    <Label htmlFor="shipping_address">{t('checkout.address.street')} *</Label>
                     <Input
                       id="shipping_address"
                       value={formData.shipping_address}
@@ -282,7 +284,7 @@ const CheckoutPage = () => {
 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <Label htmlFor="shipping_city">Ville *</Label>
+                      <Label htmlFor="shipping_city">{t('checkout.address.city')} *</Label>
                       <Input
                         id="shipping_city"
                         value={formData.shipping_city}
@@ -293,7 +295,7 @@ const CheckoutPage = () => {
                       />
                     </div>
                     <div>
-                      <Label htmlFor="shipping_country">Pays *</Label>
+                      <Label htmlFor="shipping_country">{t('checkout.address.country')} *</Label>
                       <Select
                         value={formData.shipping_country}
                         onValueChange={(val) => setFormData({ ...formData, shipping_country: val })}
@@ -318,7 +320,7 @@ const CheckoutPage = () => {
                   <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
                     <CreditCard className="w-5 h-5 text-primary" />
                   </div>
-                  <h2 className="font-heading font-bold text-lg">Mode de paiement</h2>
+                  <h2 className="font-heading font-bold text-lg">{t('checkout.payment')}</h2>
                 </div>
 
                 <div className="space-y-3">
@@ -335,8 +337,8 @@ const CheckoutPage = () => {
                     />
                     <CreditCard className="w-6 h-6 text-slate-600" />
                     <div>
-                      <p className="font-medium">Carte bancaire</p>
-                      <p className="text-sm text-slate-500">Visa, Mastercard, etc.</p>
+                      <p className="font-medium">{t('checkout.card')}</p>
+                      <p className="text-sm text-slate-500">{t('checkout.card.sub')}</p>
                     </div>
                   </label>
 
@@ -353,8 +355,8 @@ const CheckoutPage = () => {
                     />
                     <DeviceMobile className="w-6 h-6 text-slate-600" />
                     <div>
-                      <p className="font-medium">Mobile Money</p>
-                      <p className="text-sm text-slate-500">MTN, Orange Money, Airtel</p>
+                      <p className="font-medium">{t('checkout.mobile')}</p>
+                      <p className="text-sm text-slate-500">{t('checkout.mobile.sub')}</p>
                     </div>
                   </label>
                 </div>
@@ -362,12 +364,12 @@ const CheckoutPage = () => {
 
               {/* Notes */}
               <div className="bg-white border border-slate-200 rounded-lg p-6">
-                <Label htmlFor="notes">Notes (optionnel)</Label>
+                <Label htmlFor="notes">{t('checkout.notes')}</Label>
                 <Textarea
                   id="notes"
                   value={formData.notes}
                   onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  placeholder="Instructions spéciales pour la livraison..."
+                  placeholder={t('checkout.notes.ph')}
                   data-testid="order-notes"
                 />
               </div>
@@ -379,7 +381,7 @@ const CheckoutPage = () => {
                 disabled={loading}
                 data-testid="submit-order"
               >
-                {loading ? 'Traitement...' : 'Procéder au paiement'}
+                {loading ? t('checkout.processing') : t('checkout.submit')}
               </Button>
             </form>
           </div>
@@ -387,7 +389,7 @@ const CheckoutPage = () => {
           {/* Order summary */}
           <div className="lg:col-span-1">
             <div className="bg-white border border-slate-200 rounded-lg p-6 sticky top-24">
-              <h2 className="font-heading font-bold text-lg mb-4">Récapitulatif</h2>
+              <h2 className="font-heading font-bold text-lg mb-4">{t('cart.summary')}</h2>
               
               <div className="space-y-3 mb-4 max-h-64 overflow-y-auto">
                 {cart.items.map((item) => (
@@ -408,7 +410,7 @@ const CheckoutPage = () => {
 
               <div className="border-t pt-4 space-y-2">
                 <div className="border-t pt-2 flex justify-between font-heading font-bold text-lg">
-                  <span>Total</span>
+                  <span>{t('cart.total')}</span>
                   <span className="text-primary">{formatPrice(total)}</span>
                 </div>
               </div>
@@ -416,7 +418,7 @@ const CheckoutPage = () => {
               <div className="flex items-center justify-center gap-4 mt-6 pt-4 border-t">
                 <div className="flex items-center gap-2 text-slate-500">
                   <ShieldCheck className="w-5 h-5" />
-                  <span className="text-xs">Paiement sécurisé</span>
+                  <span className="text-xs">{t('checkout.secure')}</span>
                 </div>
               </div>
             </div>

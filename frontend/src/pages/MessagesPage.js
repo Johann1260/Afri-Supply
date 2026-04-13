@@ -5,6 +5,7 @@ import { Layout } from '../components/layout';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { useAuth } from '../context/AuthContext';
+import { useLocale } from '../context/LocaleContext';
 import { messagesAPI } from '../lib/api';
 import { toast } from 'sonner';
 
@@ -19,6 +20,7 @@ const MessagesPage = () => {
   const navigate = useNavigate();
   const { partnerId } = useParams();
   const { user, isAuthenticated, loading: authLoading } = useAuth();
+  const { t } = useLocale();
 
   const [conversations, setConversations] = useState([]);
   const [messages, setMessages] = useState([]);
@@ -219,7 +221,7 @@ const MessagesPage = () => {
         await fetchMessages(partnerId);
         await fetchConversations();
       } catch (err) {
-        toast.error("Erreur lors de l'envoi");
+        toast.error(t('messages.send.error'));
         setNewMessage(content);
       } finally {
         setSending(false);
@@ -240,17 +242,17 @@ const MessagesPage = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header avec indicateur WS */}
         <div className="flex items-center justify-between mb-6">
-          <h1 className="section-heading">Messages</h1>
+          <h1 className="section-heading">{t('messages.title')}</h1>
           <div className="flex items-center gap-1.5 text-xs">
             {wsConnected ? (
               <>
                 <WifiHigh className="w-4 h-4 text-green-500" weight="fill" />
-                <span className="text-green-600 font-medium">Temps réel</span>
+                <span className="text-green-600 font-medium">{t('messages.realtime')}</span>
               </>
             ) : (
               <>
                 <WifiSlash className="w-4 h-4 text-slate-400" />
-                <span className="text-slate-400">Mode standard</span>
+                <span className="text-slate-400">{t('messages.offline')}</span>
               </>
             )}
           </div>
@@ -263,7 +265,7 @@ const MessagesPage = () => {
           {/* Conversations list */}
           <div className={`w-full md:w-80 border-r border-slate-200 flex flex-col ${partnerId ? 'hidden md:flex' : ''}`}>
             <div className="p-4 border-b border-slate-200">
-              <h2 className="font-semibold">Conversations</h2>
+              <h2 className="font-semibold">{t('messages.conversations')}</h2>
             </div>
             <div className="flex-1 overflow-y-auto">
               {loading ? (
@@ -279,7 +281,7 @@ const MessagesPage = () => {
                   ))}
                 </div>
               ) : conversations.length === 0 ? (
-                <div className="p-4 text-center text-slate-500">Aucune conversation</div>
+                <div className="p-4 text-center text-slate-500">{t('messages.none')}</div>
               ) : (
                 conversations.map((conv) => (
                   <button
@@ -349,7 +351,7 @@ const MessagesPage = () => {
                   <Input
                     value={newMessage}
                     onChange={(e) => setNewMessage(e.target.value)}
-                    placeholder="Écrivez votre message..."
+                    placeholder={t('messages.placeholder')}
                     className="flex-1"
                     data-testid="message-input"
                   />
@@ -367,7 +369,7 @@ const MessagesPage = () => {
               <div className="flex-1 flex items-center justify-center text-slate-500">
                 <div className="text-center">
                   <User className="w-12 h-12 mx-auto mb-4 text-slate-300" />
-                  <p>Sélectionnez une conversation</p>
+                  <p>{t('messages.select')}</p>
                 </div>
               </div>
             )}

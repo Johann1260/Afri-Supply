@@ -1,7 +1,10 @@
 import React from 'react';
 import { ProductCard } from './ProductCard';
+import { useLocale } from '../../context/LocaleContext';
 
 export const ProductGrid = ({ products, loading, onFavoriteToggle }) => {
+  const { t } = useLocale();
+
   if (loading) {
     return (
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -29,7 +32,7 @@ export const ProductGrid = ({ products, loading, onFavoriteToggle }) => {
   if (!products || products.length === 0) {
     return (
       <div className="text-center py-12">
-        <p className="text-slate-500">Aucun produit trouvé</p>
+        <p className="text-slate-500">{t('common.noResults')}</p>
       </div>
     );
   }
@@ -37,11 +40,7 @@ export const ProductGrid = ({ products, loading, onFavoriteToggle }) => {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
       {products.map((product) => (
-        <ProductCard 
-          key={product.id} 
-          product={product} 
-          onFavoriteToggle={onFavoriteToggle}
-        />
+        <ProductCard key={product.id} product={product} onFavoriteToggle={onFavoriteToggle} />
       ))}
     </div>
   );

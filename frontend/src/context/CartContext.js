@@ -5,16 +5,14 @@ import { useAuth } from './AuthContext';
 const CartContext = createContext(null);
 
 export const useCart = () => {
-  const context = useContext(CartContext);
-  if (!context) {
-    throw new Error('useCart must be used within a CartProvider');
-  }
-  return context;
+  const ctx = useContext(CartContext);
+  if (!ctx) throw new Error('useCart must be used within a CartProvider');
+  return ctx;
 };
 
 export const CartProvider = ({ children }) => {
   const { isAuthenticated } = useAuth();
-  const [cart, setCart] = useState({ items: [], total: 0, item_count: 0 });
+  const [cart, setCart]     = useState({ items: [], total: 0, item_count: 0 });
   const [loading, setLoading] = useState(false);
 
   const fetchCart = useCallback(async () => {
@@ -22,31 +20,28 @@ export const CartProvider = ({ children }) => {
       setCart({ items: [], total: 0, item_count: 0 });
       return;
     }
-    
     try {
       setLoading(true);
-      const response = await cartAPI.get();
-      setCart(response.data);
-    } catch (error) {
-      console.error('Failed to fetch cart:', error);
+      const res = await cartAPI.get();
+      setCart(res.data);
+    } catch (err) {
+      console.error('fetchCart error:', err);
     } finally {
       setLoading(false);
     }
   }, [isAuthenticated]);
 
-  useEffect(() => {
-    fetchCart();
-  }, [fetchCart]);
+  useEffect(() => { fetchCart(); }, [fetchCart]);
 
   const addToCart = async (productId, quantity = 1) => {
     try {
       setLoading(true);
-      const response = await cartAPI.addItem(productId, quantity);
-      setCart(response.data);
+      const res = await cartAPI.addItem(productId, quantity);
+      setCart(res.data);
       return true;
-    } catch (error) {
-      console.error('Failed to add to cart:', error);
-      throw error;
+    } catch (err) {
+      console.error('addToCart error:', err);
+      throw err;
     } finally {
       setLoading(false);
     }
@@ -55,11 +50,11 @@ export const CartProvider = ({ children }) => {
   const updateQuantity = async (productId, quantity) => {
     try {
       setLoading(true);
-      const response = await cartAPI.updateItem(productId, quantity);
-      setCart(response.data);
-    } catch (error) {
-      console.error('Failed to update quantity:', error);
-      throw error;
+      const res = await cartAPI.updateItem(productId, quantity);
+      setCart(res.data);
+    } catch (err) {
+      console.error('updateQuantity error:', err);
+      throw err;
     } finally {
       setLoading(false);
     }
@@ -68,11 +63,11 @@ export const CartProvider = ({ children }) => {
   const removeFromCart = async (productId) => {
     try {
       setLoading(true);
-      const response = await cartAPI.removeItem(productId);
-      setCart(response.data);
-    } catch (error) {
-      console.error('Failed to remove from cart:', error);
-      throw error;
+      const res = await cartAPI.removeItem(productId);
+      setCart(res.data);
+    } catch (err) {
+      console.error('removeFromCart error:', err);
+      throw err;
     } finally {
       setLoading(false);
     }
@@ -83,26 +78,20 @@ export const CartProvider = ({ children }) => {
       setLoading(true);
       await cartAPI.clear();
       setCart({ items: [], total: 0, item_count: 0 });
-    } catch (error) {
-      console.error('Failed to clear cart:', error);
-      throw error;
+    } catch (err) {
+      console.error('clearCart error:', err);
+      throw err;
     } finally {
       setLoading(false);
     }
   };
 
-  const value = {
-    cart,
-    loading,
-    addToCart,
-    updateQuantity,
-    removeFromCart,
-    clearCart,
-    refreshCart: fetchCart,
-  };
-
   return (
-    <CartContext.Provider value={value}>
+    <CartContext.Provider value={{
+      cart, loading,
+      addToCart, updateQuantity, removeFromCart, clearCart,
+      refreshCart: fetchCart,
+    }}>
       {children}
     </CartContext.Provider>
   );

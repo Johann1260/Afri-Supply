@@ -32,6 +32,8 @@ import { notificationsAPI } from '../../lib/api';
 export const Header = () => {
   const { user, isAuthenticated, logout } = useAuth();
   const { cart } = useCart();
+  // P4-24: i18n
+  const { locale, setLocale, t } = useLocale();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -73,10 +75,10 @@ export const Header = () => {
   };
 
   const navLinks = [
-    { href: '/products', label: 'Produits' },
-    { href: '/categories', label: 'Catégories' },
-    { href: '/suppliers', label: 'Fournisseurs' },
-    { href: '/blog', label: 'Actualités' },
+    { href: '/products',   label: t('nav.products') },
+    { href: '/categories', label: t('nav.categories') },
+    { href: '/suppliers',  label: t('nav.suppliers') },
+    { href: '/blog',       label: t('nav.news') },
   ];
 
   return (
@@ -86,12 +88,29 @@ export const Header = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center text-sm">
             <p className="hidden sm:block">
-              Marketplace B2B Industrielle pour l'Afrique Centrale
+              {locale === 'fr'
+                ? "Marketplace B2B Industrielle pour l'Afrique Centrale"
+                : 'B2B Industrial Marketplace for Central Africa'}
             </p>
-            <div className="flex items-center gap-4">
-              <span>FR</span>
-              <span className="text-white/60">|</span>
-              <span className="text-white/60">EN</span>
+            {/* P4-24: switcher fonctionnel FR / EN */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setLocale('fr')}
+                className={`px-2 py-0.5 rounded text-sm font-medium transition-colors ${
+                  locale === 'fr' ? 'text-white' : 'text-white/50 hover:text-white/80'
+                }`}
+              >
+                FR
+              </button>
+              <span className="text-white/40">|</span>
+              <button
+                onClick={() => setLocale('en')}
+                className={`px-2 py-0.5 rounded text-sm font-medium transition-colors ${
+                  locale === 'en' ? 'text-white' : 'text-white/50 hover:text-white/80'
+                }`}
+              >
+                EN
+              </button>
             </div>
           </div>
         </div>
@@ -110,7 +129,7 @@ export const Header = () => {
             <div className="relative w-full">
               <Input
                 type="text"
-                placeholder="Rechercher des produits, fournisseurs..."
+                placeholder={locale === 'fr' ? 'Rechercher des produits, fournisseurs...' : 'Search products, suppliers...'}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-4 pr-12 py-2.5 border-slate-300 focus:border-primary"
@@ -183,32 +202,32 @@ export const Header = () => {
                   <DropdownMenuItem asChild>
                     <Link to="/dashboard" className="flex items-center gap-2" data-testid="dashboard-link">
                       <Package className="w-4 h-4" />
-                      Tableau de bord
+                      {t('nav.dashboard')}
                     </Link>
                   </DropdownMenuItem>
                   {/* P2-9: lien vers la page profil */}
                   <DropdownMenuItem asChild>
                     <Link to="/profile" className="flex items-center gap-2" data-testid="profile-link">
                       <GearSix className="w-4 h-4" />
-                      Mon profil
+                      {t('nav.profile')}
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
                     <Link to="/favorites" className="flex items-center gap-2" data-testid="favorites-link">
                       <Heart className="w-4 h-4" />
-                      Favoris
+                      {t('nav.favorites')}
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
                     <Link to="/messages" className="flex items-center gap-2" data-testid="messages-link">
                       <ChatCircle className="w-4 h-4" />
-                      Messages
+                      {t('nav.messages')}
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
                     <Link to="/rfq" className="flex items-center gap-2" data-testid="rfq-link">
                       <FileText className="w-4 h-4" />
-                      Demandes de devis
+                      {t('nav.rfq')}
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
@@ -218,7 +237,7 @@ export const Header = () => {
                     data-testid="logout-button"
                   >
                     <SignOut className="w-4 h-4 mr-2" />
-                    Déconnexion
+                    {t('nav.logout')}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -226,12 +245,12 @@ export const Header = () => {
               <div className="flex items-center gap-2">
                 <Link to="/login">
                   <Button variant="ghost" size="sm" data-testid="login-button">
-                    Connexion
+                    {t('nav.login')}
                   </Button>
                 </Link>
                 <Link to="/register">
                   <Button size="sm" className="bg-accent hover:bg-accent-hover" data-testid="register-button">
-                    S'inscrire
+                    {t('nav.register')}
                   </Button>
                 </Link>
               </div>

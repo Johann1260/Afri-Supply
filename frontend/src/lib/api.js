@@ -1,107 +1,171 @@
+/**
+ * api.js — Client HTTP sécurisé AfriSupply
+ *
+ * Corrections :
+ * - Refresh token envoyé en QUERY PARAM (FastAPI: `async def refresh_token(refresh_token: str)`)
+ * - File d'attente pendant le refresh (évite les rafales de refreshs concurrents)
+ * - Timeout 15s, retry auto 503/504
+ * - Headers de sécurité sur chaque requête
+ * - Sanitisation XSS basique des query params
+ */
+
 import axios from 'axios';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
 
+// ── Instance Axios ────────────────────────────────────────────────────────────
 const api = axios.create({
   baseURL: `${API_URL}/api`,
   headers: { 'Content-Type': 'application/json' },
+  timeout: 15000,
 });
 
-// Request interceptor
+// ── Request interceptor — token + sécurité ────────────────────────────────────
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('access_token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+
+  // Indiquer que c'est un appel XHR (aide les WAF à filtrer)
+  config.headers['X-Requested-With'] = 'XMLHttpRequest';
+
+  // Sanitiser les query params (strip balises HTML basiques)
+  if (config.params) {
+    const clean = {};
+    for (const [k, v] of Object.entries(config.params)) {
+      if (v !== undefined && v !== null) {
+        clean[k] = typeof v === 'string' ? v.replace(/<[^>]*>/g, '').trim() : v;
+      }
+    }
+    config.params = clean;
   }
+
   return config;
 });
 
-// P1 FIX: Le backend /auth/refresh attend le refresh_token en Authorization header (Bearer),
-// pas en body. On corrige l'appel en conséquence et on ajoute un flag _refreshing
-// pour éviter les boucles infinies.
-let _refreshing = false;
-let _refreshSubscribers = [];
+// ── Refresh token — état singleton ───────────────────────────────────────────
+let _isRefreshing = false;
+let _waitQueue = []; // { resolve, reject }[]
 
-const onRefreshed = (token) => {
-  _refreshSubscribers.forEach((cb) => cb(token));
-  _refreshSubscribers = [];
+const flushQueue = (err, token) => {
+  _waitQueue.forEach((p) => (err ? p.reject(err) : p.resolve(token)));
+  _waitQueue = [];
 };
 
+const hardLogout = () => {
+  localStorage.removeItem('access_token');
+  localStorage.removeItem('refresh_token');
+  localStorage.removeItem('user');
+  if (!window.location.pathname.startsWith('/login')) {
+    window.location.href = '/login?expired=true';
+  }
+};
+
+// ── Response interceptor — refresh + retry ───────────────────────────────────
 api.interceptors.response.use(
-  (response) => response,
+  (res) => res,
   async (error) => {
-    const originalRequest = error.config;
+    const orig = error.config;
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      originalRequest._retry = true;
-
-      const refreshToken = localStorage.getItem('refresh_token');
-
-      if (!refreshToken) {
-        localStorage.clear();
-        window.location.href = '/login?expired=true';
-        return Promise.reject(error);
-      }
-
-      // Si un refresh est déjà en cours, mettre la requête en file d'attente
-      if (_refreshing) {
-        return new Promise((resolve) => {
-          _refreshSubscribers.push((newToken) => {
-            originalRequest.headers.Authorization = `Bearer ${newToken}`;
-            resolve(api(originalRequest));
-          });
-        });
-      }
-
-      _refreshing = true;
-
-      try {
-        // P1 FIX: envoi du refresh_token en Authorization header (comme attendu par le backend)
-        const res = await axios.post(
-          `${API_URL}/api/auth/refresh`,
-          {},
-          { headers: { Authorization: `Bearer ${refreshToken}` } }
-        );
-
-        const { access_token, refresh_token } = res.data;
-
-        localStorage.setItem('access_token', access_token);
-        localStorage.setItem('refresh_token', refresh_token);
-
-        api.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
-        originalRequest.headers.Authorization = `Bearer ${access_token}`;
-
-        onRefreshed(access_token);
-        return api(originalRequest);
-      } catch (refreshError) {
-        console.error('Refresh failed — redirecting to login');
-        localStorage.clear();
-        _refreshSubscribers = [];
-        window.location.href = '/login?expired=true';
-        return Promise.reject(refreshError);
-      } finally {
-        _refreshing = false;
-      }
+    // Retry automatique sur erreurs serveur temporaires
+    if ([502, 503, 504].includes(error.response?.status) && !orig._retried) {
+      orig._retried = true;
+      await new Promise((r) => setTimeout(r, 1200));
+      return api(orig);
     }
 
-    return Promise.reject(error);
+    // Pas un 401, ou déjà retenté → rejeter directement
+    if (error.response?.status !== 401 || orig._retry) {
+      return Promise.reject(error);
+    }
+
+    // Ne pas boucler sur l'endpoint refresh lui-même
+    if (orig.url?.includes('/auth/refresh')) {
+      hardLogout();
+      return Promise.reject(error);
+    }
+
+    orig._retry = true;
+
+    const refreshToken = localStorage.getItem('refresh_token');
+    if (!refreshToken) {
+      hardLogout();
+      return Promise.reject(error);
+    }
+
+    // Déjà un refresh en cours → mettre en attente
+    if (_isRefreshing) {
+      return new Promise((resolve, reject) => {
+        _waitQueue.push({
+          resolve: (newToken) => {
+            orig.headers.Authorization = `Bearer ${newToken}`;
+            resolve(api(orig));
+          },
+          reject,
+        });
+      });
+    }
+
+    _isRefreshing = true;
+
+    try {
+      // ✅ CORRECTION CLÉE : FastAPI déclare `refresh_token: str` sans body/header annotation
+      // → FastAPI le lit comme un QUERY PARAMETER.
+      // On envoie donc : POST /api/auth/refresh?refresh_token=<token>
+      const res = await axios.post(
+        `${API_URL}/api/auth/refresh`,
+        null,                                        // body vide
+        { params: { refresh_token: refreshToken } }  // ← query param
+      );
+
+      const newAccess = res.data.access_token;
+      const newRefresh = res.data.refresh_token;
+
+      if (!newAccess) throw new Error('Refresh response missing access_token');
+
+      localStorage.setItem('access_token', newAccess);
+      if (newRefresh) localStorage.setItem('refresh_token', newRefresh);
+
+      api.defaults.headers.common['Authorization'] = `Bearer ${newAccess}`;
+      orig.headers.Authorization = `Bearer ${newAccess}`;
+
+      flushQueue(null, newAccess);
+      return api(orig);
+    } catch (refreshErr) {
+      flushQueue(refreshErr, null);
+      hardLogout();
+      return Promise.reject(refreshErr);
+    } finally {
+      _isRefreshing = false;
+    }
   }
 );
 
-// Auth
+// ═══════════════════════════════════════════════════════════════════════════════
+// APIs
+// ═══════════════════════════════════════════════════════════════════════════════
+
 export const authAPI = {
   login: async (data) => {
-    const response = await api.post('/auth/login', data);
-    const { access_token, refresh_token, user } = response.data;
-
-    localStorage.setItem('access_token', access_token);
-    localStorage.setItem('refresh_token', refresh_token);
-    localStorage.setItem('user', JSON.stringify(user));
-
-    return response;
+    const res = await api.post('/auth/login', data);
+    const { access_token, refresh_token, user } = res.data;
+    if (access_token) localStorage.setItem('access_token', access_token);
+    if (refresh_token) localStorage.setItem('refresh_token', refresh_token);
+    if (user) localStorage.setItem('user', JSON.stringify(user));
+    return res;
   },
-
   register: (data) => api.post('/auth/register', data),
+  uploadDocuments: (userId, files) => {
+    const form = new FormData();
+    files.forEach((f) => form.append('documents', f));
+    return api.post(`/auth/documents/${userId}`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  verifyEmail: (token) => api.get(`/auth/verify-email`, { params: { token } }),
+  resendVerification: (email) => api.post('/auth/resend-verification', { email }),
+  forgotPassword: (email) => api.post('/auth/forgot-password', { email }),
+  resetPassword: (token, password) =>
+    api.post('/auth/reset-password', { token, password }),
 };
 
 export const categoriesAPI = {
@@ -114,31 +178,30 @@ export const productsAPI = {
   getPopular: (limit = 8) => api.get('/products/popular', { params: { limit } }),
   getRecommendations: () => api.get('/products/recommendations'),
   getById: (id) => api.get(`/products/${id}`),
-  
-  create: (data) => {
-    if (data instanceof FormData) {
-      return api.post('/products', data, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-    }
-    return api.post('/products', data);
-  },
-
-  update: (id, data) => api.put(`/products/${id}`, data),
+  getCount: (params) =>
+    api.get('/products', { params: { ...params, skip: 0, limit: 9999 } }),
+  create: (data) =>
+    data instanceof FormData
+      ? api.post('/products', data, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        })
+      : api.post('/products', data),
+  update: (id, data) =>
+    data instanceof FormData
+      ? api.put(`/products/${id}`, data, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        })
+      : api.put(`/products/${id}`, data),
   delete: (id) => api.delete(`/products/${id}`),
-  
   getSupplierProducts: () => api.get('/supplier/products'),
-
-  // P1 FIX: endpoint dédié pour obtenir le count total (nécessaire pour la pagination serveur)
-  // Le backend actuel ne retourne pas de count — cette méthode fait une requête sans limit
-  // pour calculer le total. À remplacer par un vrai endpoint /products/count quand disponible.
-  getCount: (params) => api.get('/products', { params: { ...params, skip: 0, limit: 9999 } }),
 };
 
 export const cartAPI = {
   get: () => api.get('/cart'),
-  addItem: (productId, quantity) => api.post('/cart/items', { product_id: productId, quantity }),
-  updateItem: (productId, quantity) => api.put(`/cart/items/${productId}`, null, { params: { quantity } }),
+  addItem: (productId, quantity) =>
+    api.post('/cart/items', { product_id: productId, quantity }),
+  updateItem: (productId, quantity) =>
+    api.put(`/cart/items/${productId}`, null, { params: { quantity } }),
   removeItem: (productId) => api.delete(`/cart/items/${productId}`),
   clear: () => api.delete('/cart'),
 };
@@ -147,11 +210,13 @@ export const ordersAPI = {
   create: (data) => api.post('/orders', data),
   getAll: () => api.get('/orders'),
   getById: (id) => api.get(`/orders/${id}`),
-  updateStatus: (id, status) => api.put(`/orders/${id}/status`, null, { params: { status } }),
+  updateStatus: (id, status) =>
+    api.put(`/orders/${id}/status`, null, { params: { status } }),
 };
 
 export const paymentAPI = {
-  createCheckoutSession: (originUrl) => api.post('/checkout/session', { origin_url: originUrl }),
+  createCheckoutSession: (originUrl) =>
+    api.post('/checkout/session', { origin_url: originUrl }),
   getCheckoutStatus: (sessionId) => api.get(`/checkout/status/${sessionId}`),
 };
 
@@ -205,7 +270,8 @@ export const notificationsAPI = {
 
 export const mobileMoneyAPI = {
   createPayment: (data) => api.post('/checkout/mobile-money', data),
-  confirmPayment: (transactionId) => api.post(`/checkout/mobile-money/${transactionId}/confirm`),
+  confirmPayment: (transactionId) =>
+    api.post(`/checkout/mobile-money/${transactionId}/confirm`),
 };
 
 export const seedAPI = {

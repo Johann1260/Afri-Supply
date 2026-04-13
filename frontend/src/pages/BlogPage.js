@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocale } from '../context/LocaleContext';
 import { Link } from 'react-router-dom';
 import { ArrowRight, BookOpen, Clock, Eye } from '@phosphor-icons/react';
 import { Layout } from '../components/layout';
@@ -6,6 +7,7 @@ import { blogAPI } from '../lib/api';
 import { formatDate } from '../lib/utils';
 
 const BlogPage = () => {
+  const { t } = useLocale();
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -30,10 +32,10 @@ const BlogPage = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         {/* Header */}
         <div className="mb-10">
-          <p className="overline text-accent mb-2">ACTUALITÉS</p>
-          <h1 className="section-heading">Le blog AfriSupply</h1>
+          <p className="overline text-accent mb-2">{t('blog.overline')}</p>
+          <h1 className="section-heading">{t('blog.title')}</h1>
           <p className="text-slate-500 mt-2 max-w-xl">
-            Tendances industrielles, guides d'achat et actualités de la zone CEMAC.
+            {t('blog.subtitle')}
           </p>
         </div>
 
@@ -51,7 +53,7 @@ const BlogPage = () => {
         ) : posts.length === 0 ? (
           <div className="text-center py-20">
             <BookOpen className="w-16 h-16 mx-auto text-slate-300 mb-4" />
-            <p className="text-slate-500 text-lg">Aucun article pour le moment.</p>
+            <p className="text-slate-500 text-lg">{t('blog.none')}</p>
           </div>
         ) : (
           <>
@@ -93,11 +95,11 @@ const BlogPage = () => {
                     </span>
                     <span className="flex items-center gap-1">
                       <Eye className="w-4 h-4" />
-                      {featured.views || 0} vues
+                      {featured.views || 0} {t('blog.views')}
                     </span>
                   </div>
                   <div className="flex items-center gap-2 text-accent font-medium mt-6">
-                    Lire l'article
+                    {t('blog.read')}
                     <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                   </div>
                 </div>

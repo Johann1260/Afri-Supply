@@ -10,7 +10,8 @@ import {
   PencilSimple,
   Trash,
   Eye,
-  CaretDown
+  CaretDown,
+  DownloadSimple
 } from "@phosphor-icons/react";
 import { Layout } from "../components/layout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
@@ -44,7 +45,9 @@ import {
 } from "@/components/ui/select";
 import { ordersAPI, productsAPI, supplierAPI, rfqAPI } from "../lib/api";
 import { formatPrice, formatDate, getStatusColor, getStatusLabel, getImageUrl } from "../lib/utils";
+import { exportSupplierOrders, exportSupplierProducts } from "../lib/exportUtils";
 import { useAuth } from "@/context/AuthContext";
+import { useLocale } from '../context/LocaleContext';
 import { toast } from "sonner";
 
 // P2-7: statuts que le fournisseur peut définir, dans l'ordre logique
@@ -59,6 +62,7 @@ const SUPPLIER_STATUSES = [
 
 export default function DashboardSupplier() {
   const { isSupplier } = useAuth();
+  const { t } = useLocale();
   const navigate = useNavigate();
 
   const [orders, setOrders] = useState([]);
@@ -197,7 +201,7 @@ export default function DashboardSupplier() {
     <Layout>
       <div className="max-w-7xl mx-auto px-4 py-8">
         <div className="flex justify-between items-center mb-8">
-          <h1 className="text-3xl font-bold">Tableau de bord Fournisseur</h1>
+          <h1 className="text-3xl font-bold">{t('dash.supplier.title')}</h1>
           <Button asChild className="bg-accent hover:bg-accent-hover">
             <Link to="/dashboard/products/new">
               <Plus className="w-4 h-4 mr-2" />
@@ -252,7 +256,7 @@ export default function DashboardSupplier() {
                 </span>
               )}
             </TabsTrigger>
-            <TabsTrigger value="products">Produits</TabsTrigger>
+            <TabsTrigger value="products">{t('dash.supplier.products')}</TabsTrigger>
             <TabsTrigger value="rfqs">Demandes de devis</TabsTrigger>
           </TabsList>
 
@@ -260,12 +264,21 @@ export default function DashboardSupplier() {
           <TabsContent value="orders">
             <Card>
               <CardHeader>
-                <CardTitle>Commandes reçues ({orders.length})</CardTitle>
+                <div className="flex justify-between items-center">
+                  <CardTitle>{t('dash.supplier.orders')} ({orders.length})</CardTitle>
+                  {/* P4-23: export CSV commandes */}
+                  {orders.length > 0 && (
+                    <Button variant="outline" size="sm" onClick={() => exportSupplierOrders(orders)}>
+                      <DownloadSimple className="w-4 h-4 mr-2" />
+                      Exporter CSV
+                    </Button>
+                  )}
+                </div>
               </CardHeader>
               <CardContent>
                 {orders.length === 0 ? (
                   <div className="text-center py-12 text-slate-500">
-                    Aucune commande pour le moment
+                    {t('common.noResults')}
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
@@ -343,15 +356,24 @@ export default function DashboardSupplier() {
               <CardHeader>
                 <div className="flex justify-between items-center">
                   <CardTitle>Mes produits ({products.length})</CardTitle>
-                  <Button variant="outline" size="sm" onClick={fetchData}>
-                    Rafraîchir
-                  </Button>
+                  <div className="flex gap-2">
+                    {/* P4-23: export catalogue */}
+                    {products.length > 0 && (
+                      <Button variant="outline" size="sm" onClick={() => exportSupplierProducts(products)}>
+                        <DownloadSimple className="w-4 h-4 mr-2" />
+                        Exporter CSV
+                      </Button>
+                    )}
+                    <Button variant="outline" size="sm" onClick={fetchData}>
+                      Rafraîchir
+                    </Button>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>
                 {products.length === 0 ? (
                   <div className="text-center py-12 text-slate-500">
-                    Aucun produit ajouté pour le moment
+                    {t('common.noResults')}
                   </div>
                 ) : (
                   <>
@@ -445,12 +467,12 @@ export default function DashboardSupplier() {
           <TabsContent value="rfqs">
             <Card>
               <CardHeader>
-                <CardTitle>Demandes de devis reçues ({rfqs.length})</CardTitle>
+                <CardTitle>{t('dash.supplier.rfqsRec')} ({rfqs.length})</CardTitle>
               </CardHeader>
               <CardContent>
                 {rfqs.length === 0 ? (
                   <div className="text-center py-12 text-slate-500">
-                    Aucune demande de devis reçue pour le moment
+                    {t('common.noResults')}
                   </div>
                 ) : (
                   <div className="space-y-4">

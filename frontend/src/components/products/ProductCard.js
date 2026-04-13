@@ -4,15 +4,18 @@ import { Heart, ShoppingCart, Star } from '@phosphor-icons/react';
 import { formatPrice, getImageUrl } from '../../lib/utils';
 import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
+import { useLocale } from '../../context/LocaleContext';
 import { favoritesAPI } from '../../lib/api';
+import { registerFavoritesCacheReset } from '../../context/AuthContext';
 import { toast } from 'sonner';
 import { Button } from '../ui/button';
 
-// P2-10: cache global des favoris pour éviter N appels API (un par ProductCard)
-// Rempli par le premier composant qui monte, partagé ensuite.
-let _favoritesCache = null; // Set<string> d'IDs ou null si non chargé
+let _favoritesCache = null;
 let _favoritesLoading = false;
 let _favoritesCallbacks = [];
+
+// Expose reset to AuthContext
+registerFavoritesCacheReset(() => { _favoritesCache = null; });
 
 const loadFavoritesOnce = (callback) => {
   if (_favoritesCache !== null) {
@@ -49,6 +52,7 @@ export const ProductCard = ({ product, onFavoriteToggle }) => {
   const navigate = useNavigate();
   const { addToCart, loading: cartLoading } = useCart();
   const { isAuthenticated } = useAuth();
+  const { t } = useLocale();
 
   const [isFavorite, setIsFavorite] = useState(false);
   const [isAddingToCart, setIsAddingToCart] = useState(false);
@@ -66,7 +70,7 @@ export const ProductCard = ({ product, onFavoriteToggle }) => {
     e.stopPropagation();
 
     if (!isAuthenticated) {
-      toast.error('Veuillez vous connecter pour ajouter au panier');
+      toast.error(t('products.addToCart') + ' — connexion requise');
       return;
     }
 
@@ -75,7 +79,7 @@ export const ProductCard = ({ product, onFavoriteToggle }) => {
       await addToCart(product.id, product.min_order_quantity || 1);
       toast.success('Produit ajouté au panier');
     } catch (error) {
-      toast.error("Erreur lors de l'ajout au panier");
+      toast.error(t('common.error'));
     } finally {
       setIsAddingToCart(false);
     }
@@ -86,7 +90,7 @@ export const ProductCard = ({ product, onFavoriteToggle }) => {
     e.stopPropagation();
 
     if (!isAuthenticated) {
-      toast.error('Veuillez vous connecter pour ajouter aux favoris');
+      toast.error(t('nav.login'));
       return;
     }
 
@@ -179,7 +183,7 @@ export const ProductCard = ({ product, onFavoriteToggle }) => {
                 {formatPrice(product.price)}
               </p>
               <p className="text-xs text-slate-500">
-                Min. {product.min_order_quantity} {product.unit}
+                {t('products.minOrder')} {product.min_order_quantity} {product.unit}
               </p>
             </div>
 

@@ -2,24 +2,25 @@
 import React from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useLocale } from '../../context/LocaleContext';
 
 export const RequireSupplier = () => {
   const { isAuthenticated, isSupplier, loading } = useAuth();
-
-  console.log('RequireSupplier → isSupplier:', isSupplier, 'isAuthenticated:', isAuthenticated, 'loading:', loading);
+  const { t } = useLocale();
 
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center">Vérification du rôle...</div>;
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          <p className="text-slate-500 text-sm">{t('common.loading')}</p>
+        </div>
+      </div>
+    );
   }
 
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
-
-  if (!isSupplier) {
-    console.log('RequireSupplier → Accès refusé (pas supplier)');
-    return <Navigate to="/" replace />;
-  }
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (!isSupplier) return <Navigate to="/" replace />;
 
   return <Outlet />;
 };

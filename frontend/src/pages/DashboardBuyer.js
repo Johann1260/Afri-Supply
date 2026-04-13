@@ -8,6 +8,7 @@ import {
   Eye,
   FileText,
   Star,
+  DownloadSimple,
 } from "@phosphor-icons/react";
 import { Layout } from "../components/layout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
@@ -24,9 +25,12 @@ import { Textarea } from "../components/ui/textarea";
 import { Label } from "../components/ui/label";
 import { ordersAPI, favoritesAPI, reviewsAPI } from "../lib/api";
 import { formatPrice, formatDate, getStatusColor, getStatusLabel, getImageUrl } from "../lib/utils";
-import { toast } from "sonner";
+import { exportBuyerOrders } from "../lib/exportUtils";
+import { useLocale } from "../context/LocaleContext";
+import { toast } from "sonner"; 
 
 export default function DashboardBuyer() {
+  const { t } = useLocale();
   const [orders, setOrders] = useState([]);
   const [favorites, setFavorites] = useState([]);
   const [pendingReviews, setPendingReviews] = useState([]);
@@ -104,7 +108,7 @@ export default function DashboardBuyer() {
     <Layout>
       <div className="max-w-7xl mx-auto px-4 py-8">
         <div className="flex justify-between items-center mb-8">
-          <h1 className="section-heading">Tableau de bord Acheteur</h1>
+          <h1 className="section-heading">{t('dash.buyer.title')}</h1>
           <Button asChild className="bg-accent hover:bg-accent-hover">
             <Link to="/rfq">
               <FileText className="w-4 h-4 mr-2" />
@@ -126,7 +130,7 @@ export default function DashboardBuyer() {
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <Clock className="w-5 h-5 text-yellow-600" />En cours
+                <Clock className="w-5 h-5 text-yellow-600" />{t('dash.buyer.ongoing')}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -209,11 +213,26 @@ export default function DashboardBuyer() {
           {/* Orders Tab */}
           <TabsContent value="orders">
             <Card>
-              <CardHeader><CardTitle>Dernières commandes</CardTitle></CardHeader>
+              <CardHeader>
+                <div className="flex justify-between items-center">
+                  <CardTitle>{t('dash.buyer.recentOrders')}</CardTitle>
+                  {/* P4-23: export CSV */}
+                  {orders.length > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => exportBuyerOrders(orders)}
+                    >
+                      <DownloadSimple className="w-4 h-4 mr-2" />
+                      Exporter CSV
+                    </Button>
+                  )}
+                </div>
+              </CardHeader>
               <CardContent>
                 {orders.length === 0 ? (
                   <div className="text-center py-12 text-slate-500">
-                    Aucune commande pour le moment
+                    {t('common.noResults')}
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
@@ -278,11 +297,11 @@ export default function DashboardBuyer() {
           {/* Favorites Tab */}
           <TabsContent value="favorites">
             <Card>
-              <CardHeader><CardTitle>Mes produits favoris</CardTitle></CardHeader>
+              <CardHeader><CardTitle>{t('dash.buyer.myFavorites')}</CardTitle></CardHeader>
               <CardContent>
                 {favorites.length === 0 ? (
                   <div className="text-center py-12 text-slate-500">
-                    Aucun produit dans vos favoris
+                    {t('common.noResults')}
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -319,7 +338,7 @@ export default function DashboardBuyer() {
           <DialogHeader>
             <DialogTitle>Noter ce produit</DialogTitle>
             <DialogDescription>
-              {reviewTarget?.product_name} — commande {reviewTarget?.order_number}
+              {reviewTarget?.product_name} — commande #{reviewTarget?.order_id?.slice(0, 8).toUpperCase()}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-5 pt-2">

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useLocale } from '../context/LocaleContext';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { EnvelopeSimple, Storefront, ArrowLeft, CheckCircle } from '@phosphor-icons/react';
@@ -10,6 +11,7 @@ import api from '../lib/api';
 import { toast } from 'sonner';
 
 const ForgotPasswordPage = () => {
+  const { t } = useLocale();
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
@@ -56,7 +58,7 @@ const ForgotPasswordPage = () => {
                 <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
                   <CheckCircle className="w-8 h-8 text-green-600" weight="fill" />
                 </div>
-                <h1 className="font-heading font-bold text-xl mb-2">Email envoyé</h1>
+                <h1 className="font-heading font-bold text-xl mb-2">{t('auth.forgot.sent.title')}</h1>
                 <p className="text-slate-500 mb-6">
                   Si un compte existe pour <strong>{email}</strong>, vous recevrez un lien de
                   réinitialisation dans les prochaines minutes. Vérifiez aussi vos spams.
@@ -103,7 +105,7 @@ const ForgotPasswordPage = () => {
                     disabled={loading}
                     data-testid="forgot-submit"
                   >
-                    {loading ? 'Envoi en cours...' : 'Envoyer le lien'}
+                    {loading ? t('auth.forgot.loading') : t('auth.forgot.submit')}
                   </Button>
                 </form>
 

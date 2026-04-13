@@ -11,9 +11,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { productsAPI, categoriesAPI } from '../lib/api';
 import { toast } from 'sonner';
 import { getImageUrl } from '../lib/utils';
+import { useLocale } from '../context/LocaleContext';
 import { useAuth } from '../context/AuthContext';
 
 export default function EditProductPage() {
+  const { t } = useLocale();
   const { id } = useParams();
   const navigate = useNavigate();
   const { isSupplier } = useAuth();
@@ -263,7 +265,7 @@ export default function EditProductPage() {
               </div>
 
               <Button type="submit" className="w-full py-6 text-lg" disabled={saving}>
-                {saving ? 'Enregistrement...' : 'Enregistrer les modifications'}
+                {saving ? t('common.loading').replace('..','') : t('profile.save')}
               </Button>
             </form>
           </CardContent>
