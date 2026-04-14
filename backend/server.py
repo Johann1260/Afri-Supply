@@ -102,6 +102,15 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "geolocation=(), microphone=()"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "img-src * data: blob:; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "script-src 'self' 'unsafe-inline' https://js.stripe.com; "
+            "frame-src https://js.stripe.com https://hooks.stripe.com; "
+            "connect-src 'self' https://api.stripe.com wss:;"
+        )
         # Ne pas exposer la version du serveur
         if "server" in response.headers:
             del response.headers["server"]
@@ -134,6 +143,8 @@ class UserResponse(BaseModel):
     city: Optional[str] = None
     user_type: str
     created_at: str
+    account_status: Optional[str] = None
+    email_verified: Optional[bool] = None
 
 class TokenResponse(BaseModel):
     access_token: str
@@ -647,7 +658,9 @@ async def register(request: Request, user_data: UserCreate):
         id=user_id, email=user_data.email, full_name=user_data.full_name,
         company_name=user_data.company_name, phone=user_data.phone,
         country=user_data.country, city=user_data.city,
-        user_type=user_data.user_type, created_at=now
+        user_type=user_data.user_type, created_at=now,
+        account_status="pending_email",
+        email_verified=False
     )
     return {
         "access_token": access_token_val,
@@ -731,7 +744,9 @@ async def login(request: Request, credentials: UserLogin):
         country=user.get("country"),
         city=user.get("city"),
         user_type=user["user_type"],
-        created_at=user["created_at"]
+        created_at=user["created_at"],
+        account_status=user.get("account_status", "active"),
+        email_verified=user.get("email_verified", True)
     )
 
     return {
@@ -773,7 +788,9 @@ async def get_me(current_user: dict = Depends(get_current_user)):
         company_name=current_user.get("company_name"),
         phone=current_user.get("phone"), country=current_user.get("country"),
         city=current_user.get("city"), user_type=current_user["user_type"],
-        created_at=current_user["created_at"]
+        created_at=current_user["created_at"],
+        account_status=current_user.get("account_status", "active"),
+        email_verified=current_user.get("email_verified", True)
     )
 
 @api_router.put("/auth/me", response_model=UserResponse)
@@ -790,7 +807,9 @@ async def update_me(data: dict, current_user: dict = Depends(get_current_user)):
         company_name=merged.get("company_name"),
         phone=merged.get("phone"), country=merged.get("country"),
         city=merged.get("city"), user_type=merged["user_type"],
-        created_at=merged["created_at"]
+        created_at=merged["created_at"],
+        account_status=merged.get("account_status", "active"),
+        email_verified=merged.get("email_verified", True)
     )
 
 class PasswordChange(BaseModel):
@@ -848,9 +867,16 @@ async def verify_email(token: str):
     if expires and datetime.fromisoformat(expires) < datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="Lien expiré")
     
+    # Buyers → active immédiatement. Suppliers → garder pending_review si déjà soumis
+    is_supplier = user.get("user_type") == "supplier"
+    already_pending_review = user.get("account_status") == "pending_review"
+    new_status = "pending_review" if (is_supplier and already_pending_review) else "active"
     await db.users.update_one(
         {"id": user["id"]},
-        {"$set": {"email_verified": True}, "$unset": {"email_verification_token": "", "email_verification_expires": ""}}
+        {
+            "$set": {"email_verified": True, "account_status": new_status},
+            "$unset": {"email_verification_token": "", "email_verification_expires": ""}
+        }
     )
     return {"message": "Email vérifié avec succès"}
 
@@ -1030,6 +1056,68 @@ async def create_category(category: CategoryCreate, current_user: dict = Depends
 
 # ======================= PRODUCTS ENDPOINTS =======================
 
+def _build_product_query(
+    category_id=None, supplier_id=None, search=None,
+    min_price=None, max_price=None, is_available=None
+):
+    """Construit le filtre MongoDB commun aux endpoints produits."""
+    query = {}
+    if category_id:
+        query["category_id"] = category_id
+    if supplier_id:
+        query["supplier_id"] = supplier_id
+    if search:
+        # Utilise l'index text si disponible, sinon fallback regex
+        query["$text"] = {"$search": search}
+    if min_price is not None or max_price is not None:
+        query["price"] = {}
+        if min_price is not None:
+            query["price"]["$gte"] = min_price
+        if max_price is not None:
+            query["price"]["$lte"] = max_price
+    if is_available is not None:
+        query["is_available"] = is_available
+    return query
+
+async def _enrich_products(products: list, db) -> list:
+    """Batch-enrichit les produits avec catégorie et fournisseur (évite le N+1)."""
+    if not products:
+        return products
+
+    cat_ids  = list({p.get("category_id") for p in products if p.get("category_id")})
+    sup_ids  = list({p.get("supplier_id")  for p in products if p.get("supplier_id")})
+
+    categories = {c["id"]: c async for c in db.categories.find({"id": {"$in": cat_ids}}, {"_id": 0})}
+    suppliers  = {s["id"]: s async for s in db.users.find({"id": {"$in": sup_ids}}, {"_id": 0})}
+
+    for product in products:
+        cat = categories.get(product.get("category_id"), {})
+        sup = suppliers.get(product.get("supplier_id"), {})
+        product["category_name"]    = cat.get("name")
+        product["supplier_name"]    = sup.get("full_name")
+        product["supplier_company"] = sup.get("company_name")
+        # S'assurer que description n'est jamais None
+        if product.get("description") is None:
+            product["description"] = ""
+
+    return products
+
+
+@api_router.get("/products/count")
+@limiter.limit("100/minute")
+async def count_products(
+    request: Request,
+    category_id: Optional[str] = None,
+    supplier_id: Optional[str] = None,
+    search: Optional[str] = None,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    is_available: Optional[bool] = None,
+):
+    query = _build_product_query(category_id, supplier_id, search, min_price, max_price, is_available)
+    count = await db.products.count_documents(query)
+    return {"count": count}
+
 
 @api_router.get("/products", response_model=List[ProductResponse])
 @limiter.limit("100/minute")
@@ -1047,58 +1135,20 @@ async def get_products(
     skip: int = 0,
     limit: int = 20
 ):
-    query = {}
-    if category_id:
-        query["category_id"] = category_id
-    if supplier_id:
-        query["supplier_id"] = supplier_id
-    if search:
-        query["$or"] = [
-            {"name": {"$regex": search, "$options": "i"}},
-            {"name_en": {"$regex": search, "$options": "i"}},
-            {"description": {"$regex": search, "$options": "i"}}
-        ]
-    if min_price is not None:
-        query["price"] = {"$gte": min_price}
-    if max_price is not None:
-        query.setdefault("price", {})["$lte"] = max_price
-    if is_available is not None:
-        query["is_available"] = is_available
-    
+    query = _build_product_query(category_id, supplier_id, search, min_price, max_price, is_available)
     sort_direction = -1 if sort_order == "desc" else 1
     products = await db.products.find(query, {"_id": 0}).sort(sort_by, sort_direction).skip(skip).limit(limit).to_list(limit)
-    
-    # Enrich with category and supplier info
-    for product in products:
-        category = await db.categories.find_one({"id": product.get("category_id")}, {"_id": 0})
-        supplier = await db.users.find_one({"id": product.get("supplier_id")}, {"_id": 0})
-        product["category_name"] = category.get("name") if category else None
-        product["supplier_name"] = supplier.get("full_name") if supplier else None
-        product["supplier_company"] = supplier.get("company_name") if supplier else None
-    
-    return products
+    return await _enrich_products(products, db)
+
 
 @api_router.get("/products/popular", response_model=List[ProductResponse])
 @limiter.limit("100/minute")
 async def get_popular_products(request: Request, limit: int = 8):
     products = await db.products.find(
-        {"is_available": True}, 
-        {"_id": 0}
+        {"is_available": True}, {"_id": 0}
     ).sort("rating", -1).limit(limit).to_list(limit)
+    return await _enrich_products(products, db)
 
-    for product in products:
-        # Correction critique : si description est None, on la transforme en chaîne vide
-        if product.get("description") is None:
-            product["description"] = ""
-
-        category = await db.categories.find_one({"id": product.get("category_id")}, {"_id": 0})
-        supplier = await db.users.find_one({"id": product.get("supplier_id")}, {"_id": 0})
-        
-        product["category_name"] = category.get("name") if category else None
-        product["supplier_name"] = supplier.get("full_name") if supplier else None
-        product["supplier_company"] = supplier.get("company_name") if supplier else None
-
-    return products
 
 @api_router.get("/products/recommendations", response_model=List[ProductResponse])
 @limiter.limit("100/minute")
@@ -1137,18 +1187,11 @@ async def get_recommendations(request: Request, current_user: dict = Depends(get
         else:
             products = await db.products.find({"is_available": True}, {"_id": 0}).sort("rating", -1).limit(8).to_list(8)
         
-        for product in products:
-            category = await db.categories.find_one({"id": product.get("category_id")}, {"_id": 0})
-            supplier = await db.users.find_one({"id": product.get("supplier_id")}, {"_id": 0})
-            product["category_name"] = category.get("name") if category else None
-            product["supplier_name"] = supplier.get("full_name") if supplier else None
-            product["supplier_company"] = supplier.get("company_name") if supplier else None
-        
-        return products
+        return await _enrich_products(products, db)
     except Exception as e:
         logger.error(f"Recommendation error: {e}")
         products = await db.products.find({"is_available": True}, {"_id": 0}).sort("created_at", -1).limit(8).to_list(8)
-        return products
+        return await _enrich_products(products, db)
 
 @api_router.get("/products/{product_id}", response_model=ProductResponse)
 @limiter.limit("100/minute")
@@ -1157,11 +1200,8 @@ async def get_product(request: Request, product_id: str, current_user: dict = De
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     
-    category = await db.categories.find_one({"id": product.get("category_id")}, {"_id": 0})
-    supplier = await db.users.find_one({"id": product.get("supplier_id")}, {"_id": 0})
-    product["category_name"] = category.get("name") if category else None
-    product["supplier_name"] = supplier.get("full_name") if supplier else None
-    product["supplier_company"] = supplier.get("company_name") if supplier else None
+    enriched = await _enrich_products([product], db)
+    product = enriched[0]
     
     # Track view for logged-in users
     if current_user:
@@ -1213,8 +1253,8 @@ async def create_product(
 
     product_doc = {
         "id": product_id,
-        "name": name,
-        "description": description,
+        "name": sanitize_string(name, 200),
+        "description": sanitize_string(description, 5000),
         "price": price,
         "unit": unit,
         "min_order_quantity": min_order_quantity,
@@ -1345,32 +1385,9 @@ async def get_supplier_products(request: Request, current_user: dict = Depends(g
         raise HTTPException(status_code=403, detail="Only suppliers can access this")
     
     products = await db.products.find(
-        {"supplier_id": current_user["id"]}, 
-        {"_id": 0}
+        {"supplier_id": current_user["id"]}, {"_id": 0}
     ).to_list(1000)
-
-    result = []
-    for product in products:
-        # Conversion de l'ID en string et nettoyage des champs None
-        product["id"] = str(product.get("id", ""))
-        
-        # Fix principal : description ne doit jamais être None
-        product["description"] = product.get("description") or ""
-
-        # Autres champs optionnels
-        product["supplier_name"] = current_user.get("full_name", "")
-        product["supplier_company"] = current_user.get("company_name", "")
-
-        # Enrichissement catégorie
-        if product.get("category_id"):
-            category = await db.categories.find_one({"id": product["category_id"]}, {"_id": 0})
-            product["category_name"] = category.get("name") if category else None
-        else:
-            product["category_name"] = None
-
-        result.append(product)
-
-    return result
+    return await _enrich_products(products, db)
 # ======================= CART ENDPOINTS =======================
 
 @api_router.get("/cart", response_model=CartResponse)
@@ -1379,28 +1396,40 @@ async def get_cart(current_user: dict = Depends(get_current_user)):
     if not cart:
         cart = {"id": str(uuid.uuid4()), "user_id": current_user["id"], "items": []}
         await db.carts.insert_one(cart)
-    
+
+    cart_items = cart.get("items", [])
+    if not cart_items:
+        return CartResponse(id=cart["id"], user_id=current_user["id"], items=[], total=0.0, item_count=0)
+
+    # Batch fetch products and suppliers
+    product_ids = [i["product_id"] for i in cart_items]
+    products_list = await db.products.find({"id": {"$in": product_ids}}, {"_id": 0}).to_list(100)
+    products_map = {p["id"]: p for p in products_list}
+
+    supplier_ids = list({p.get("supplier_id") for p in products_list if p.get("supplier_id")})
+    suppliers_list = await db.users.find({"id": {"$in": supplier_ids}}, {"_id": 0}).to_list(100)
+    suppliers_map = {s["id"]: s for s in suppliers_list}
+
     enriched_items = []
     total = 0.0
-    
-    for item in cart.get("items", []):
-        product = await db.products.find_one({"id": item["product_id"]}, {"_id": 0})
+    for item in cart_items:
+        product = products_map.get(item["product_id"])
         if product:
-            supplier = await db.users.find_one({"id": product.get("supplier_id")}, {"_id": 0})
+            supplier = suppliers_map.get(product.get("supplier_id"), {})
             subtotal = product["price"] * item["quantity"]
             enriched_items.append(CartItemResponse(
                 product_id=item["product_id"],
                 product_name=product["name"],
                 product_image=product["images"][0] if product.get("images") else None,
                 supplier_id=product["supplier_id"],
-                supplier_name=supplier.get("full_name") if supplier else "Unknown",
+                supplier_name=supplier.get("full_name", "Unknown"),
                 price=product["price"],
                 quantity=item["quantity"],
                 unit=product["unit"],
                 subtotal=subtotal
             ))
             total += subtotal
-    
+
     return CartResponse(
         id=cart["id"],
         user_id=current_user["id"],
@@ -1569,10 +1598,12 @@ async def create_checkout_session(request: CheckoutRequest, http_request: Reques
     if not cart or not cart.get("items"):
         raise HTTPException(status_code=400, detail="Cart is empty")
     
+    # Calculate cart total
     total = 0.0
     for item in cart["items"]:
         product = await db.products.find_one({"id": item["product_id"]}, {"_id": 0})
-        total += product["price"] * item["quantity"]
+        if product:
+            total += product["price"] * item["quantity"]
     
     total_usd = round(total / 600, 2)  # Conversion XAF to USD
     
@@ -1588,8 +1619,8 @@ async def create_checkout_session(request: CheckoutRequest, http_request: Reques
             "quantity": 1,
         }],
         mode="payment",
-        success_url=f"{request.origin_url}/checkout/success?session_id={{CHECKOUT_SESSION_ID}}",
-        cancel_url=f"{request.origin_url}/checkout/cancel",
+        success_url=f"{request.origin_url}/checkout?session_id={{CHECKOUT_SESSION_ID}}",
+        cancel_url=f"{request.origin_url}/cart",
         metadata={"user_id": current_user["id"], "cart_total_xaf": str(total)}
     )
     
@@ -1623,6 +1654,9 @@ async def stripe_webhook(request: Request):
     sig_header = request.headers.get("stripe-signature")
     endpoint_secret = os.environ.get("STRIPE_WEBHOOK_SECRET")
     
+    if not endpoint_secret:
+        raise HTTPException(status_code=500, detail="Webhook secret not configured")
+    
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
     except ValueError:
@@ -1632,11 +1666,30 @@ async def stripe_webhook(request: Request):
     
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
+        # Mettre à jour la transaction de paiement
         await db.payment_transactions.update_one(
-            {"session_id": session.id},
+            {"session_id": session["id"]},
             {"$set": {"status": "paid", "payment_status": "paid"}}
         )
-        # Traiter la commande ici (ex. : créer des ordres)
+        # Mettre à jour les commandes de l'utilisateur en attente de paiement
+        user_id = session.get("metadata", {}).get("user_id")
+        if user_id:
+            await db.orders.update_many(
+                {
+                    "buyer_id": user_id,
+                    "payment_status": "pending",
+                    "payment_method": "stripe"
+                },
+                {"$set": {"payment_status": "paid", "status": "confirmed"}}
+            )
+            # Notifier l'acheteur
+            await create_notification(
+                user_id=user_id,
+                type="order",
+                title="Paiement confirmé",
+                message="Votre paiement a été confirmé. Vos commandes sont en cours de traitement.",
+                related_id=None
+            )
     
     return {"status": "success"}
 
@@ -1670,19 +1723,10 @@ async def remove_favorite(product_id: str, current_user: dict = Depends(get_curr
 async def get_favorites(current_user: dict = Depends(get_current_user)):
     user = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
     favorites = user.get("favorites", [])
-    
-    products = []
-    for pid in favorites:
-        product = await db.products.find_one({"id": pid}, {"_id": 0})
-        if product:
-            category = await db.categories.find_one({"id": product.get("category_id")}, {"_id": 0})
-            supplier = await db.users.find_one({"id": product.get("supplier_id")}, {"_id": 0})
-            product["category_name"] = category.get("name") if category else None
-            product["supplier_name"] = supplier.get("full_name") if supplier else None
-            product["supplier_company"] = supplier.get("company_name") if supplier else None
-            products.append(product)
-    
-    return products
+    if not favorites:
+        return []
+    products = await db.products.find({"id": {"$in": favorites}}, {"_id": 0}).to_list(200)
+    return await _enrich_products(products, db)
 
 # ======================= MESSAGES ENDPOINTS =======================
 
@@ -1701,7 +1745,7 @@ async def send_message(message: MessageCreate, current_user: dict = Depends(get_
         "sender_name": current_user["full_name"],
         "receiver_id": message.receiver_id,
         "receiver_name": receiver["full_name"],
-        "content": message.content,
+        "content": sanitize_string(message.content, 2000),
         "product_id": message.product_id,
         "is_read": False,
         "created_at": now
@@ -1712,33 +1756,52 @@ async def send_message(message: MessageCreate, current_user: dict = Depends(get_
 
 @api_router.get("/messages/conversations", response_model=List[ConversationResponse])
 async def get_conversations(current_user: dict = Depends(get_current_user)):
-    # Get all messages involving current user
+    uid = current_user["id"]
+
+    # 1. Récupérer tous les messages de l'utilisateur (tri desc = le plus récent en premier par conv)
     messages = await db.messages.find(
-        {"$or": [{"sender_id": current_user["id"]}, {"receiver_id": current_user["id"]}]},
+        {"$or": [{"sender_id": uid}, {"receiver_id": uid}]},
         {"_id": 0}
     ).sort("created_at", -1).to_list(1000)
-    
-    # Group by conversation partner
-    conversations = {}
+
+    # 2. Grouper par partenaire — première occurrence = message le plus récent
+    conv_map: dict = {}  # partner_id → last_msg
     for msg in messages:
-        partner_id = msg["receiver_id"] if msg["sender_id"] == current_user["id"] else msg["sender_id"]
-        if partner_id not in conversations:
-            partner = await db.users.find_one({"id": partner_id}, {"_id": 0})
-            unread = await db.messages.count_documents({
-                "sender_id": partner_id,
-                "receiver_id": current_user["id"],
-                "is_read": False
-            })
-            conversations[partner_id] = ConversationResponse(
-                partner_id=partner_id,
-                partner_name=partner.get("full_name") if partner else "Unknown",
-                partner_company=partner.get("company_name") if partner else None,
-                last_message=msg["content"][:100],
-                last_message_time=msg["created_at"],
-                unread_count=unread
-            )
-    
-    return list(conversations.values())
+        partner_id = msg["receiver_id"] if msg["sender_id"] == uid else msg["sender_id"]
+        if partner_id not in conv_map:
+            conv_map[partner_id] = msg
+
+    if not conv_map:
+        return []
+
+    partner_ids = list(conv_map.keys())
+
+    # 3. Batch fetch partenaires
+    partners_list = await db.users.find({"id": {"$in": partner_ids}}, {"_id": 0}).to_list(200)
+    partners_map = {p["id"]: p for p in partners_list}
+
+    # 4. Batch fetch unread counts via aggregation
+    unread_pipeline = [
+        {"$match": {"receiver_id": uid, "sender_id": {"$in": partner_ids}, "is_read": False}},
+        {"$group": {"_id": "$sender_id", "count": {"$sum": 1}}}
+    ]
+    unread_cursor = db.messages.aggregate(unread_pipeline)
+    unread_map = {doc["_id"]: doc["count"] async for doc in unread_cursor}
+
+    # 5. Construire les réponses
+    result = []
+    for partner_id, last_msg in conv_map.items():
+        partner = partners_map.get(partner_id, {})
+        result.append(ConversationResponse(
+            partner_id=partner_id,
+            partner_name=partner.get("full_name", "Unknown"),
+            partner_company=partner.get("company_name"),
+            last_message=last_msg["content"][:100],
+            last_message_time=last_msg["created_at"],
+            unread_count=unread_map.get(partner_id, 0)
+        ))
+
+    return result
 
 @api_router.get("/messages/{partner_id}", response_model=List[MessageResponse])
 async def get_messages(partner_id: str, current_user: dict = Depends(get_current_user)):
@@ -1910,34 +1973,49 @@ async def get_supplier_profile(supplier_id: str):
 
 @api_router.get("/suppliers", response_model=List[SupplierProfileResponse])
 async def get_suppliers(sort_by: str = "rating", limit: int = 20):
-    """Get list of suppliers"""
+    """Get list of suppliers — batch aggregation pour éviter le N+1"""
     suppliers = await db.users.find({"user_type": "supplier"}, {"_id": 0}).to_list(limit)
-    
-    result = []
-    for supplier in suppliers:
-        products_count = await db.products.count_documents({"supplier_id": supplier["id"]})
-        orders_completed = await db.orders.count_documents({"supplier_id": supplier["id"], "status": "delivered"})
-        
-        result.append(SupplierProfileResponse(
-            id=supplier["id"],
-            full_name=supplier["full_name"],
-            company_name=supplier.get("company_name"),
-            country=supplier.get("country"),
-            city=supplier.get("city"),
-            rating=supplier.get("supplier_rating", 0.0),
-            rating_count=supplier.get("rating_count", 0),
-            communication_avg=supplier.get("communication_avg", 0.0),
-            quality_avg=supplier.get("quality_avg", 0.0),
-            delivery_avg=supplier.get("delivery_avg", 0.0),
-            products_count=products_count,
-            orders_completed=orders_completed,
-            member_since=supplier["created_at"]
-        ))
-    
-    # Sort by rating
+    if not suppliers:
+        return []
+
+    supplier_ids = [s["id"] for s in suppliers]
+
+    # Batch: compter les produits par fournisseur
+    products_pipeline = [
+        {"$match": {"supplier_id": {"$in": supplier_ids}}},
+        {"$group": {"_id": "$supplier_id", "count": {"$sum": 1}}}
+    ]
+    products_counts = {doc["_id"]: doc["count"] async for doc in db.products.aggregate(products_pipeline)}
+
+    # Batch: compter les commandes livrées par fournisseur
+    orders_pipeline = [
+        {"$match": {"supplier_id": {"$in": supplier_ids}, "status": "delivered"}},
+        {"$group": {"_id": "$supplier_id", "count": {"$sum": 1}}}
+    ]
+    orders_counts = {doc["_id"]: doc["count"] async for doc in db.orders.aggregate(orders_pipeline)}
+
+    result = [
+        SupplierProfileResponse(
+            id=s["id"],
+            full_name=s["full_name"],
+            company_name=s.get("company_name"),
+            country=s.get("country"),
+            city=s.get("city"),
+            rating=s.get("supplier_rating", 0.0),
+            rating_count=s.get("rating_count", 0),
+            communication_avg=s.get("communication_avg", 0.0),
+            quality_avg=s.get("quality_avg", 0.0),
+            delivery_avg=s.get("delivery_avg", 0.0),
+            products_count=products_counts.get(s["id"], 0),
+            orders_completed=orders_counts.get(s["id"], 0),
+            member_since=s["created_at"]
+        )
+        for s in suppliers
+    ]
+
     if sort_by == "rating":
         result.sort(key=lambda x: x.rating, reverse=True)
-    
+
     return result
 
 # ======================= SUPPLIER STATS =======================
@@ -2297,7 +2375,7 @@ async def create_review(review: ReviewCreate, current_user: dict = Depends(get_c
         "user_id": current_user["id"],
         "user_name": current_user["full_name"],
         "rating": review.rating,
-        "comment": review.comment,
+        "comment": sanitize_string(review.comment, 1000) if review.comment else None,
         "created_at": now
     }
     
@@ -2668,7 +2746,7 @@ app.include_router(api_router)
 # CORS — restreindre aux origines connues en production
 ALLOWED_ORIGINS = os.environ.get(
     "ALLOWED_ORIGINS",
-    "http://localhost:3001,http://192.168.56.1:3001,https://afri-supply-production.up.railway.app, https://www.afrisupply.com"
+    "http://localhost:3001,https://afri-supply-production.up.railway.app,https://www.afrisupply.com"
 ).split(",")
 
 app.add_middleware(

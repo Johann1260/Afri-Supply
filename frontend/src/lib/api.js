@@ -178,8 +178,7 @@ export const productsAPI = {
   getPopular: (limit = 8) => api.get('/products/popular', { params: { limit } }),
   getRecommendations: () => api.get('/products/recommendations'),
   getById: (id) => api.get(`/products/${id}`),
-  getCount: (params) =>
-    api.get('/products', { params: { ...params, skip: 0, limit: 9999 } }),
+  getCount: (params) => api.get('/products/count', { params }),
   create: (data) =>
     data instanceof FormData
       ? api.post('/products', data, {

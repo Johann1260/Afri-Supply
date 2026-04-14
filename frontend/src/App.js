@@ -12,6 +12,41 @@ import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { RequireBuyer } from "./components/auth/RequireBuyer";
 import { RequireSupplier } from "./components/auth/RequireSupplier";
 
+// ── Error Boundary ────────────────────────────────────────────────────────────
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, info) {
+    console.error("ErrorBoundary caught:", error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center text-center p-8">
+          <div>
+            <p className="text-7xl font-bold text-slate-200 mb-4">500</p>
+            <h1 className="text-2xl font-semibold text-slate-800 mb-2">Une erreur est survenue</h1>
+            <p className="text-slate-500 mb-6">Veuillez rafraîchir la page ou réessayer plus tard.</p>
+            <button
+              onClick={() => this.setState({ hasError: false, error: null })}
+              className="text-accent hover:underline font-medium"
+            >
+              Réessayer
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+
 // ── Lazy imports ─────────────────────────────────────────────────────────────
 // Pages publiques (chargées à la demande)
 const HomePage           = lazy(() => import("./pages/HomePage"));
@@ -60,6 +95,7 @@ function App() {
       <AuthProvider>
         <CartProvider>
           <BrowserRouter>
+            <ErrorBoundary>
             <Suspense fallback={<PageLoader />}>
               <Routes>
                 {/* ── Routes publiques ─────────────────────────────────── */}
@@ -127,6 +163,7 @@ function App() {
                 } />
               </Routes>
             </Suspense>
+            </ErrorBoundary>
           </BrowserRouter>
 
           <Toaster position="top-right" richColors />

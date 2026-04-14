@@ -30,6 +30,7 @@ const NotificationsPage = () => {
     try {
       await notificationsAPI.markAsRead(id);
       setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, is_read: true } : n));
+      window.dispatchEvent(new Event('notifications-read'));
     } catch { toast.error(t('common.error')); }
   };
 
@@ -38,6 +39,7 @@ const NotificationsPage = () => {
       await notificationsAPI.markAllAsRead();
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
       toast.success(t('notifications.markAll.ok'));
+      window.dispatchEvent(new Event('notifications-read'));
     } catch { toast.error(t('common.error')); }
   };
 

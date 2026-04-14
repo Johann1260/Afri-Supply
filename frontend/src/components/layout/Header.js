@@ -58,7 +58,15 @@ export const Header = () => {
 
     fetchUnreadCount();
     const interval = setInterval(fetchUnreadCount, 25000);
-    return () => clearInterval(interval);
+
+    // Rafraîchir immédiatement quand les notifs sont lues depuis NotificationsPage
+    const handleNotificationsRead = () => fetchUnreadCount();
+    window.addEventListener('notifications-read', handleNotificationsRead);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('notifications-read', handleNotificationsRead);
+    };
   }, [isAuthenticated]);
 
   const handleSearch = (e) => {
@@ -213,7 +221,7 @@ export const Header = () => {
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
-                    <Link to="/favorites" className="flex items-center gap-2" data-testid="favorites-link">
+                    <Link to="/dashboard/buyer" className="flex items-center gap-2" data-testid="favorites-link">
                       <Heart className="w-4 h-4" />
                       {t('nav.favorites')}
                     </Link>

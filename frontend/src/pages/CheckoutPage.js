@@ -54,9 +54,15 @@ const CheckoutPage = () => {
   const [loading, setLoading] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState(null);
   const [mobileMoneyDialogOpen, setMobileMoneyDialogOpen] = useState(false);
+  // Mapper pays CEMAC → code ISO pour Mobile Money
+  const COUNTRY_CODES = {
+    'Cameroun': 'CM', 'Gabon': 'GA', 'Congo': 'CG',
+    'Tchad': 'TD', 'Guinée Équatoriale': 'GQ', 'Centrafrique': 'CF',
+  };
   const [mobileMoneyData, setMobileMoneyData] = useState({
     phone_number: user?.phone || '',
-    network: 'MTN'
+    network: 'MTN',
+    country_code: COUNTRY_CODES[user?.country] || 'CM',
   });
   const [mobileMoneyTransaction, setMobileMoneyTransaction] = useState(null);
   

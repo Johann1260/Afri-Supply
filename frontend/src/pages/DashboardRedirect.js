@@ -2,14 +2,11 @@ import React from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useLocale } from '@/context/LocaleContext';
-import DashboardBuyer from './DashboardBuyer';
-import DashboardSupplier from './DashboardSupplier';
 
 export default function DashboardRedirect() {
-  const { loading, isAuthenticated, isBuyer, isSupplier, user } = useAuth();
+  const { loading, isAuthenticated, isBuyer, isSupplier } = useAuth();
   const { t } = useLocale();
 
-  // Attendre la résolution de la session
   if (loading) {
     return (
       <div style={{ padding: '120px', textAlign: 'center' }}>
@@ -19,19 +16,12 @@ export default function DashboardRedirect() {
     );
   }
 
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
 
-  const userType = (user?.user_type || '').trim().toLowerCase();
+  // Rediriger vers les routes protégées par leurs guards respectifs
+  if (isSupplier) return <Navigate to="/dashboard/supplier" replace />;
+  if (isBuyer)    return <Navigate to="/dashboard/buyer" replace />;
 
-  if (isSupplier || userType === 'supplier' || userType.includes('supplier')) {
-    return <DashboardSupplier />;
-  }
-
-  if (isBuyer || userType === 'buyer') {
-    return <DashboardBuyer />;
-  }
-
+  // Rôle inconnu
   return <Navigate to="/" replace />;
 }

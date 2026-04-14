@@ -63,7 +63,7 @@ const ProductsPage = () => {
         productsAPI.getCount(base),
       ]);
       setProducts(pageRes.data || []);
-      setTotalCount((countRes.data || []).length);
+      setTotalCount(countRes.data?.count ?? 0);
     } catch { setProducts([]); setTotalCount(0); }
     finally { setLoading(false); }
   }, [debouncedSearch, categoryId, priceRange, sortBy, sortOrder, currentPage]);

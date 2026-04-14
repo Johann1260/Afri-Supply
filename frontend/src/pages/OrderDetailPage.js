@@ -329,6 +329,22 @@ const OrderDetailPage = () => {
               )}
             </div>
 
+            {/* Adresse de livraison */}
+            {(order.shipping_address || order.shipping_city) && (
+              <div className="bg-white border border-slate-200 rounded-xl p-5">
+                <div className="flex items-center gap-2 mb-3">
+                  <MapPin className="w-4 h-4 text-slate-400" />
+                  <h2 className="font-semibold text-sm text-slate-700">{t('checkout.address')}</h2>
+                </div>
+                {order.shipping_address && (
+                  <p className="text-sm text-slate-600">{order.shipping_address}</p>
+                )}
+                <p className="text-sm text-slate-600">
+                  {[order.shipping_city, order.shipping_country].filter(Boolean).join(', ')}
+                </p>
+              </div>
+            )}
+
             {/* Payment */}
             <div className="bg-white border border-slate-200 rounded-xl p-5">
               <div className="flex items-center gap-2 mb-3">

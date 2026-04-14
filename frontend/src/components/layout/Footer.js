@@ -20,19 +20,19 @@ export const Footer = () => {
       { label: t('nav.suppliers'),  href: '/suppliers' },
     ],
     company: [
-      { label: 'À propos',    href: '/about' },
-      { label: t('nav.news'), href: '/blog' },
-      { label: 'Contact',     href: '/contact' },
+      { label: t('nav.news'),    href: '/blog' },
+      { label: 'CGU',            href: '/terms' },
+      { label: 'Confidentialité', href: '/privacy' },
     ],
     support: [
-      { label: "Centre d'aide",    href: '/help' },
-      { label: t('nav.register'),  href: '/register?type=supplier' },
-      { label: 'FAQ',              href: '/faq' },
+      { label: t('nav.register') + ' fournisseur', href: '/register?type=supplier' },
+      { label: t('nav.register') + ' acheteur',    href: '/register?type=buyer' },
+      { label: 'Mentions légales', href: '/legal' },
     ],
     legal: [
-      { label: 'Conditions générales',       href: '/terms' },
+      { label: 'Conditions générales',         href: '/terms' },
       { label: 'Politique de confidentialité', href: '/privacy' },
-      { label: 'Mentions légales',            href: '/legal' },
+      { label: 'Mentions légales',             href: '/legal' },
     ],
   };
 

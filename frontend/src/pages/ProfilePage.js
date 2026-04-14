@@ -64,15 +64,12 @@ const ProfilePage = () => {
     setSaving(true);
     try {
       const res = await api.put('/auth/me', formData);
-      // Mettre à jour le localStorage avec les nouvelles données
       const updated = { ...user, ...res.data };
       localStorage.setItem('user', JSON.stringify(updated));
       toast.success(t('profile.saved'));
     } catch (err) {
-      // Si l'endpoint n'existe pas encore, on simule le succès côté local
-      const updated = { ...user, ...formData };
-      localStorage.setItem('user', JSON.stringify(updated));
-      toast.success('Profil mis à jour (local)');
+      const msg = err.response?.data?.detail || t('common.error');
+      toast.error(typeof msg === 'string' ? msg : t('common.error'));
     } finally {
       setSaving(false);
     }

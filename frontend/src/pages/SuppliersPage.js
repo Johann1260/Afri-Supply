@@ -5,8 +5,7 @@ import { Layout } from '../components/layout';
 import { ProductGrid } from '../components/products';
 import { Button } from '../components/ui/button';
 import { Progress } from '../components/ui/progress';
-import api from '../lib/api';
-import { productsAPI } from '../lib/api';
+import { supplierAPI, productsAPI } from '../lib/api';
 import { useLocale } from '../context/LocaleContext';
 import { formatDate } from '../lib/utils';
 
@@ -26,8 +25,8 @@ const SuppliersPage = () => {
 
   const fetchSuppliers = async () => {
     try {
-      const res = await api.get('/suppliers');
-      setSuppliers(res.data);
+      const res = await supplierAPI.getAll();
+      setSuppliers(res.data || []);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
@@ -35,9 +34,9 @@ const SuppliersPage = () => {
   const fetchSupplierProfile = async (id) => {
     try {
       const [profileRes, productsRes, ratingsRes] = await Promise.all([
-        api.get(`/suppliers/${id}/profile`),
+        supplierAPI.getProfile(id),
         productsAPI.getAll({ supplier_id: id, limit: 12 }),
-        api.get(`/suppliers/${id}/ratings`),
+        supplierAPI.getRatings(id),
       ]);
       setSelectedSupplier(profileRes.data);
       setSupplierProducts(productsRes.data);
