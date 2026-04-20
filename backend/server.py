@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, WebSocket, WebSocketDisconnect, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
@@ -21,6 +23,15 @@ import shutil
 from uuid import uuid4
 
 from starlette.middleware.base import BaseHTTPMiddleware
+# PDF generation — fiche produit industrielle
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm, cm
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+from reportlab.platypus import KeepTogether
+from io import BytesIO
+import base64
 from starlette.responses import Response
 # Sécurité — Rate limiting
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -32,6 +43,166 @@ from slowapi.middleware import SlowAPIMiddleware
 import re
 import html
 import secrets
+# ======================= MOTEUR ANTI-CONTOURNEMENT =======================
+# Détecte et bloque tout contact hors-plateforme dans les messages et RFQ
+
+# Patterns de numéros de téléphone (international + local Afrique)
+_PHONE_PATTERNS = [
+    r'\b(\+?\d[\s\-\.]?){7,15}\b',                     # numéro international générique
+    r'\b0[567]\d[\s\-\.]?\d{2}[\s\-\.]?\d{2}[\s\-\.]?\d{2}\b',  # mobile FR/Afrique
+    r'\b6\d{8}\b',                                            # Cameroun (6XX XXX XXX)
+    r'\b\+237[\s\-]?[67]\d{7,8}\b',                      # +237 Cameroun
+    r'\b\+241[\s\-]?\d{7,8}\b',                          # +241 Gabon
+    r'\b\+242[\s\-]?\d{7,9}\b',                          # +242 Congo
+    r'\b\+235[\s\-]?\d{7,8}\b',                          # +235 Tchad
+]
+
+# Patterns email
+_EMAIL_PATTERNS = [
+    r'[a-zA-Z0-9._%+\-]+\s*@\s*[a-zA-Z0-9.\-]+\s*\.\s*[a-zA-Z]{2,}',
+    r'[a-zA-Z0-9._%+\-]+\s*\[at\]\s*[a-zA-Z0-9.\-]+',  # obfusqué [at]
+    r'[a-zA-Z0-9._%+\-]+\s*arobase\s*[a-zA-Z0-9.\-]+',     # "arobase"
+]
+
+# Liens et apps de messagerie
+_LINK_PATTERNS = [
+    r'https?://[^\s]+',
+    r'www\.[a-zA-Z0-9\-]+\.[a-zA-Z]{2,}',
+    r'bit\.ly/[^\s]+',
+    r'wa\.me/[^\s]*',
+    r't\.me/[^\s]*',
+    r'wa\.link/[^\s]*',
+]
+
+# Phrases de contournement FR + EN
+_BYPASS_PHRASES = [
+    # Français
+    r'appelle[z\-]?moi', r'contacte[z\-]?moi', r'écri[st][\-]?moi',
+    r'en\s+priv[eé]', r'en\s+dehors', r'hors\s+(de\s+)?la\s+plateforme',
+    r'directement', r'mon\s+num[eé]ro', r'mon\s+t[eé]l[eé]phone',
+    r'mon\s+whatsapp', r'mon\s+telegram', r'mon\s+email',
+    r'je\s+t[\'e]envoie\s+(directement|en\s+priv)',
+    r'on\s+continue\s+en\s+priv', r'passe\s+par\s+whatsapp',
+    r'via\s+whatsapp', r'sur\s+whatsapp', r'sur\s+telegram',
+    r'sortir\s+de\s+la\s+plateforme', r'contourne[z\-]?',
+    r'sans\s+passer\s+par', r'par\s+ailleurs', r'mon\s+mail',
+    r'envoie[z\-]?moi\s+(un\s+)?message', r'rejoins\s+moi',
+    r'rejoignez\s+moi', r'venez\s+me\s+voir', r'passez\s+me\s+voir',
+    # Anglais
+    r'call\s+me', r'contact\s+me', r'write\s+to\s+me',
+    r'in\s+private', r'outside\s+(the\s+)?platform',
+    r'directly', r'my\s+number', r'my\s+phone', r'my\s+whatsapp',
+    r'my\s+telegram', r'my\s+email', r"i'?ll\s+send\s+you\s+directly",
+    r'let.?s\s+continue\s+privately', r'via\s+whatsapp',
+    r'on\s+whatsapp', r'on\s+telegram', r'bypass', r'my\s+mail',
+    r'send\s+me\s+a\s+message', r'join\s+me',
+    # Apps
+    r'whatsapp', r'telegram', r'signal', r'viber', r'wechat', r'imo\b',
+    r'facebook\s+messenger', r'messenger', r'line\s+app',
+]
+
+# Mots-clés de coordonnées obfusquées
+_OBFUSCATION_PATTERNS = [
+    r'\bzero\b', r'\bun\b.*\bdeux\b', r'\bone\b.*\btwo\b',
+    r'\bpoint\b.*\bcom\b', r'\btiret\b.*\btiret\b',
+    r'[a-z]\s[a-z]\s[a-z]\s*@',           # e m a i l obfusqué
+    r'\d\s+\d\s+\d\s+\d\s+\d\s+\d',  # numéro espacé
+]
+
+_ALL_PATTERNS = (
+    _PHONE_PATTERNS + _EMAIL_PATTERNS + _LINK_PATTERNS +
+    [f"(?i){p}" for p in _BYPASS_PHRASES] +
+    _OBFUSCATION_PATTERNS
+)
+_COMPILED = [re.compile(p, re.IGNORECASE) for p in _ALL_PATTERNS]
+
+
+def detect_bypass(text: str) -> dict:
+    """
+    Analyse un message texte.
+    Retourne {"blocked": bool, "reason": str, "cleaned": str}
+    """
+    if not text:
+        return {"blocked": False, "reason": "", "cleaned": text}
+
+    for pattern in _COMPILED:
+        if pattern.search(text):
+            return {
+                "blocked": True,
+                "reason": "contact_hors_plateforme",
+                "cleaned": text
+            }
+    return {"blocked": False, "reason": "", "cleaned": text}
+
+
+BLOCKED_MESSAGE_TEXT = (
+    "⚠️ Ce message a été bloqué automatiquement par AfriSupply.\n"
+    "Les échanges de coordonnées personnelles (téléphone, email, WhatsApp, "
+    "liens externes) sont interdits avant la confirmation d'un paiement.\n"
+    "Finalisez votre commande sur la plateforme pour accéder aux coordonnées "
+    "directes de votre partenaire. — Équipe AfriSupply"
+)
+
+
+def generate_anonymous_id(user_id: str) -> str:
+    """Génère un identifiant anonyme stable et lisible depuis un user_id."""
+    import hashlib
+    h = hashlib.sha256(user_id.encode()).hexdigest()[:6].upper()
+    return f"Partenaire-{h}"
+
+
+async def buyer_has_paid_order_with_supplier(db, buyer_id: str, supplier_id: str) -> bool:
+    """True si l'acheteur a au moins une commande payée avec ce fournisseur."""
+    order = await db.orders.find_one({
+        "buyer_id": buyer_id,
+        "supplier_id": supplier_id,
+        "payment_status": "paid"
+    }, {"_id": 0, "id": 1})
+    return order is not None
+
+
+async def get_contact_info_if_unlocked(db, requester_id: str, target_user: dict) -> dict:
+    """
+    Politique de contact AfriSupply :
+    - JAMAIS d'informations de contact directes exposées (ni avant, ni après paiement).
+    - Le contact passe TOUJOURS par la messagerie interne de la plateforme.
+    - Après paiement : la messagerie est activée et les noms réels sont visibles.
+    - Avant paiement : tout est anonymisé, messagerie restreinte à l'intérêt produit.
+    """
+    target_id = target_user.get("id", "")
+    target_type = target_user.get("user_type", "")
+
+    if target_type == "supplier":
+        unlocked = await buyer_has_paid_order_with_supplier(db, requester_id, target_id)
+    else:
+        unlocked = await buyer_has_paid_order_with_supplier(db, target_id, requester_id)
+
+    if unlocked:
+        return {
+            "display_name": target_user.get("company_name") or target_user.get("full_name"),
+            "company_name": target_user.get("company_name"),
+            # Coordonnées JAMAIS exposées — contact via messagerie interne uniquement
+            "phone": None,
+            "email": None,
+            "city": target_user.get("city"),
+            "country": target_user.get("country"),
+            "contact_unlocked": True,
+            "messaging_enabled": True,
+        }
+    else:
+        return {
+            "display_name": generate_anonymous_id(target_id),
+            "company_name": None,
+            "phone": None,
+            "email": None,
+            "city": None,
+            "country": target_user.get("country"),
+            "contact_unlocked": False,
+            "messaging_enabled": False,
+        }
+
+# ======================= FIN MOTEUR ANTI-CONTOURNEMENT =======================
+
 
 # Email
 import aiosmtplib
@@ -49,7 +220,15 @@ load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
+client = AsyncIOMotorClient(
+    mongo_url,
+    maxPoolSize=50,
+    minPoolSize=5,
+    maxIdleTimeMS=30000,
+    connectTimeoutMS=5000,
+    serverSelectionTimeoutMS=5000,
+    retryWrites=True,
+)
 db = client[os.environ['DB_NAME']]
 
 # JWT Configuration
@@ -146,8 +325,16 @@ class UserResponse(BaseModel):
     account_status: Optional[str] = None
     email_verified: Optional[bool] = None
 
+class UserUpdate(BaseModel):
+    full_name:    Optional[str] = None
+    company_name: Optional[str] = None
+    phone:        Optional[str] = None
+    city:         Optional[str] = None
+    country:      Optional[str] = None
+
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
     user: UserResponse
 
@@ -222,7 +409,7 @@ class ProductResponse(BaseModel):
 
 class CartItemAdd(BaseModel):
     product_id: str
-    quantity: int
+    quantity: int = Field(..., ge=1, le=10000)
 
 class CartItemResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -467,6 +654,24 @@ class NotificationResponse(BaseModel):
     related_id: Optional[str] = None
     created_at: str
 
+# ========================== TRACKING MODELS =============================
+
+class TrackingEventCreate(BaseModel):
+    status: str
+    location: Optional[str] = None
+    note: Optional[str] = None
+
+class TrackingEventResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    order_id: str
+    status: str
+    location: Optional[str] = None
+    note: Optional[str] = None
+    created_by: str
+    created_at: str
+
+
 # ======================= AUTH HELPERS =======================
 def create_refresh_token(data: dict):
     to_encode = data.copy()
@@ -601,6 +806,167 @@ def make_account_approved_email(name: str) -> str:
       </a>
     </div>
     """
+# ======================= ADMIN ENDPOINTS =======================
+@api_router.get("/admin/stats")
+async def get_admin_stats(current_user: dict = Depends(get_current_user)):
+    if current_user.get("user_type") != "admin":
+        raise HTTPException(status_code=403, detail="Admins uniquement")
+
+    results = await asyncio.gather(
+        db.users.count_documents({}),
+        db.users.count_documents({"user_type": "supplier", "account_status": "active"}),
+        db.users.count_documents({"user_type": "supplier", "account_status": {"$in": ["pending_review", "pending_email"]}}),
+        db.orders.count_documents({}),
+        db.products.count_documents({}),
+        db.rfqs.count_documents({"status": "pending"}),
+        db.bypass_attempts.count_documents({}),
+    )
+
+    rev_pipeline = [{"$match": {"payment_status": "paid"}}, {"$group": {"_id": None, "total": {"$sum": "$total"}}}]
+    rev_result   = await db.orders.aggregate(rev_pipeline).to_list(1)
+    total_revenue = rev_result[0]["total"] if rev_result else 0
+
+    recent_orders = await db.orders.find({}, {"_id": 0, "order_number": 1, "buyer_name": 1, "created_at": 1}).sort("created_at", -1).limit(5).to_list(5)
+    recent_users  = await db.users.find({},  {"_id": 0, "full_name": 1,  "user_type": 1,  "created_at": 1}).sort("created_at", -1).limit(5).to_list(5)
+
+    activity = []
+    for o in recent_orders:
+        activity.append({"type": "order", "message": f"Commande {o['order_number']} — {o['buyer_name']}", "created_at": o["created_at"]})
+    for u in recent_users:
+        activity.append({"type": "user",  "message": f"Nouveau {u['user_type']} : {u['full_name']}", "created_at": u["created_at"]})
+    activity.sort(key=lambda x: x["created_at"], reverse=True)
+
+    return {
+        "total_users":       results[0],
+        "active_suppliers":  results[1],
+        "pending_suppliers": results[2],
+        "total_orders":      results[3],
+        "total_products":    results[4],
+        "active_rfqs":       results[5],
+        "bypass_attempts":   results[6],
+        "total_revenue":     total_revenue,
+        "recent_activity":   activity[:10],
+    }
+
+
+@api_router.get("/admin/users")
+async def admin_get_users(
+    limit: int = 500, skip: int = 0,
+    user_type: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    if current_user.get("user_type") != "admin":
+        raise HTTPException(status_code=403, detail="Admins uniquement")
+    query = {}
+    if user_type: query["user_type"] = user_type
+    users = await db.users.find(
+        query,
+        {"_id": 0, "password_hash": 0, "email_verification_token": 0, "password_reset_token": 0}
+    ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    return users
+
+
+@api_router.get("/admin/suppliers/pending")
+async def admin_pending_suppliers(current_user: dict = Depends(get_current_user)):
+    if current_user.get("user_type") != "admin":
+        raise HTTPException(status_code=403, detail="Admins uniquement")
+    suppliers = await db.users.find(
+        {"user_type": "supplier", "account_status": {"$in": ["pending_review", "pending_email"]}},
+        {"_id": 0, "password_hash": 0, "email_verification_token": 0}
+    ).sort("created_at", -1).to_list(200)
+    return suppliers
+
+
+@api_router.post("/admin/reject-supplier/{user_id}")
+async def admin_reject_supplier(user_id: str, current_user: dict = Depends(get_current_user)):
+    if current_user.get("user_type") != "admin":
+        raise HTTPException(status_code=403, detail="Admins uniquement")
+    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not user: raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {"account_status": "rejected", "rejected_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    html_body = f"""
+    <div style="font-family:sans-serif;max-width:600px;margin:auto;padding:32px">
+      <h2 style="color:#034168">Votre demande d'inscription</h2>
+      <p>Bonjour {user.get('full_name', '')},</p>
+      <p>Après examen de votre dossier, nous ne sommes pas en mesure d'activer votre compte
+         fournisseur AfriSupply pour le moment. Contactez-nous à <a href="mailto:support@afrisupply.com">support@afrisupply.com</a>.</p>
+    </div>
+    """
+    await send_email(user["email"], "Votre demande d'inscription AfriSupply", html_body)
+    return {"message": "Fournisseur rejeté"}
+
+
+@api_router.get("/admin/orders")
+async def admin_get_orders(
+    limit: int = 200, skip: int = 0,
+    status: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    if current_user.get("user_type") != "admin":
+        raise HTTPException(status_code=403, detail="Admins uniquement")
+    query = {}
+    if status: query["status"] = status
+    orders = await db.orders.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    return orders
+
+
+#========================= TRACKING ENDPOINTS =======================
+@api_router.get("/orders/{order_id}/tracking")
+async def get_order_tracking(order_id: str, current_user: dict = Depends(get_current_user)):
+    """Récupère le tracking d'une commande."""
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order: raise HTTPException(status_code=404, detail="Commande introuvable")
+    if order["buyer_id"] != current_user["id"] and order["supplier_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Accès refusé")
+
+    events = await db.order_tracking.find({"order_id": order_id}, {"_id": 0}).sort("created_at", 1).to_list(50)
+    return events
+
+
+@api_router.post("/orders/{order_id}/tracking", response_model=TrackingEventResponse)
+@limiter.limit("20/minute")
+async def add_tracking_event(
+    request: Request,
+    order_id: str,
+    event: TrackingEventCreate,
+    current_user: dict = Depends(get_current_user)
+):
+    """Ajoute un événement de tracking (fournisseur uniquement)."""
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order: raise HTTPException(status_code=404, detail="Commande introuvable")
+    if order["supplier_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Seul le fournisseur peut ajouter des événements de tracking")
+
+    valid_statuses = ["preparing", "ready", "shipped", "in_transit", "delivered", "issue"]
+    if event.status not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"Statut invalide. Valeurs acceptées : {valid_statuses}")
+
+    event_id  = str(uuid.uuid4())
+    now       = datetime.now(timezone.utc).isoformat()
+    event_doc = {
+        "id":         event_id,
+        "order_id":   order_id,
+        "status":     event.status,
+        "location":   sanitize_string(event.location or "", 200),
+        "note":       sanitize_string(event.note or "", 500),
+        "created_by": current_user["id"],
+        "created_at": now,
+    }
+    await db.order_tracking.insert_one(event_doc)
+
+    # Notifier l'acheteur
+    await create_notification(
+        user_id=order["buyer_id"],
+        type="order",
+        title="Mise à jour de votre commande",
+        message=f"Commande {order.get('order_number', '')} : {event.status}{' — ' + event.location if event.location else ''}",
+        related_id=order_id
+    )
+
+    return TrackingEventResponse(**event_doc)
 
 # ======================= AUTH ENDPOINTS =======================
 
@@ -794,9 +1160,11 @@ async def get_me(current_user: dict = Depends(get_current_user)):
     )
 
 @api_router.put("/auth/me", response_model=UserResponse)
-async def update_me(data: dict, current_user: dict = Depends(get_current_user)):
-    allowed = ["full_name", "company_name", "phone", "city", "country"]
-    update = {k: sanitize_string(str(v)) for k, v in data.items() if k in allowed and v is not None}
+async def update_me(data: UserUpdate, current_user: dict = Depends(get_current_user)):
+    update = {
+        k: sanitize_string(str(v), 200)
+        for k, v in data.model_dump(exclude_none=True).items()
+    }
     if not update:
         raise HTTPException(status_code=400, detail="Aucun champ valide à mettre à jour")
     await db.users.update_one({"id": current_user["id"]}, {"$set": update})
@@ -1335,8 +1703,8 @@ async def update_product(
 
     # Construction des données à mettre à jour (seulement les champs fournis)
     update_data = {}
-    if name is not None: update_data["name"] = name
-    if description is not None: update_data["description"] = description
+    if name is not None: update_data["name"] = sanitize_string(name, 200)
+    if description is not None: update_data["description"] = sanitize_string(description, 5000)
     if price is not None: update_data["price"] = price
     if unit is not None: update_data["unit"] = unit
     if min_order_quantity is not None: update_data["min_order_quantity"] = min_order_quantity
@@ -1496,28 +1864,35 @@ async def clear_cart(current_user: dict = Depends(get_current_user)):
 
 # ======================= ORDERS ENDPOINTS =======================
 
-@api_router.post("/orders", response_model=List[OrderResponse])
 async def create_orders(order_data: OrderCreate, current_user: dict = Depends(get_current_user)):
     cart = await db.carts.find_one({"user_id": current_user["id"]}, {"_id": 0})
     if not cart or not cart.get("items"):
         raise HTTPException(status_code=400, detail="Cart is empty")
-    
-    # Group items by supplier
+
+    # BATCH : une seule requête pour tous les produits
+    product_ids = [i["product_id"] for i in cart["items"]]
+    products_list = await db.products.find({"id": {"$in": product_ids}}, {"_id": 0}).to_list(200)
+    products_map = {p["id"]: p for p in products_list}
+    supplier_ids_set = {p["supplier_id"] for p in products_list if p.get("supplier_id")}
+    suppliers_list = await db.users.find({"id": {"$in": list(supplier_ids_set)}}, {"_id": 0}).to_list(100)
+    suppliers_map = {s["id"]: s for s in suppliers_list}
     supplier_items = {}
     for item in cart["items"]:
-        product = await db.products.find_one({"id": item["product_id"]}, {"_id": 0})
-        if product:
-            sid = product["supplier_id"]
-            if sid not in supplier_items:
+      product = products_map.get(item["product_id"])
+      if product:
+          sid = product["supplier_id"]
+          supplier = suppliers_map.get(sid, {})
+          if sid not in supplier_items:
                 supplier_items[sid] = []
-            supplier_items[sid].append({
-                "product_id": product["id"],
+                supplier_items[sid].append({
+                "product_id":   product["id"],
                 "product_name": product["name"],
-                "quantity": item["quantity"],
-                "price": product["price"],
-                "unit": product["unit"],
-                "subtotal": product["price"] * item["quantity"]
+                "quantity":     item["quantity"],
+                "price":        product["price"],
+                "unit":         product["unit"],
+                "subtotal":     product["price"] * item["quantity"]
             })
+
     
     orders = []
     now = datetime.now(timezone.utc).isoformat()
@@ -1554,9 +1929,8 @@ async def create_orders(order_data: OrderCreate, current_user: dict = Depends(ge
         await db.orders.insert_one(order_doc)
         orders.append(OrderResponse(**order_doc))
     
-    # Clear cart
-    await db.carts.update_one({"user_id": current_user["id"]}, {"$set": {"items": []}})
-    
+    # Le panier est vidé uniquement après confirmation du paiement (webhook Stripe / Mobile Money)
+    # Ceci évite les commandes fantômes si le paiement échoue
     return orders
 
 @api_router.get("/orders", response_model=List[OrderResponse])
@@ -1597,14 +1971,14 @@ async def create_checkout_session(request: CheckoutRequest, http_request: Reques
     cart = await db.carts.find_one({"user_id": current_user["id"]}, {"_id": 0})
     if not cart or not cart.get("items"):
         raise HTTPException(status_code=400, detail="Cart is empty")
-    
-    # Calculate cart total
+
+    # Calcul du total
     total = 0.0
     for item in cart["items"]:
         product = await db.products.find_one({"id": item["product_id"]}, {"_id": 0})
         if product:
             total += product["price"] * item["quantity"]
-    
+
     total_usd = round(total / 600, 2)  # Conversion XAF to USD
     
     host_url = str(http_request.base_url).rstrip("/")
@@ -1668,7 +2042,7 @@ async def stripe_webhook(request: Request):
         session = event["data"]["object"]
         # Mettre à jour la transaction de paiement
         await db.payment_transactions.update_one(
-            {"session_id": session["id"]},
+            {"session_id": session.get("id") or getattr(session, "id", "")},
             {"$set": {"status": "paid", "payment_status": "paid"}}
         )
         # Mettre à jour les commandes de l'utilisateur en attente de paiement
@@ -1683,6 +2057,11 @@ async def stripe_webhook(request: Request):
                 {"$set": {"payment_status": "paid", "status": "confirmed"}}
             )
             # Notifier l'acheteur
+            # Vider le panier après paiement confirmé
+            await db.carts.update_one(
+                {"user_id": user_id},
+                {"$set": {"items": []}}
+            )
             await create_notification(
                 user_id=user_id,
                 type="order",
@@ -1735,22 +2114,66 @@ async def send_message(message: MessageCreate, current_user: dict = Depends(get_
     receiver = await db.users.find_one({"id": message.receiver_id}, {"_id": 0})
     if not receiver:
         raise HTTPException(status_code=404, detail="Receiver not found")
-    
+
+    clean_content = sanitize_string(message.content, 2000)
+
+    # ── Anti-contournement ────────────────────────────────────────────────────
+    check = detect_bypass(clean_content)
+    if check["blocked"]:
+        # Stocker le message original bloqué pour audit, mais envoyer le message système
+        msg_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+        msg_doc = {
+            "id": msg_id,
+            "sender_id": "system",
+            "sender_name": "AfriSupply",
+            "receiver_id": current_user["id"],  # renvoyé à l'expéditeur
+            "receiver_name": current_user["full_name"],
+            "content": BLOCKED_MESSAGE_TEXT,
+            "product_id": message.product_id,
+            "is_read": False,
+            "is_system": True,
+            "created_at": now
+        }
+        # Logger la tentative de contournement
+        await db.bypass_attempts.insert_one({
+            "user_id": current_user["id"],
+            "target_id": message.receiver_id,
+            "original_content": clean_content,
+            "reason": check["reason"],
+            "created_at": now
+        })
+        await db.messages.insert_one(msg_doc)
+        return MessageResponse(**msg_doc)
+
+    # ── Anonymisation des noms dans le message ────────────────────────────────
+    unlocked = await buyer_has_paid_order_with_supplier(
+        db, current_user["id"], message.receiver_id
+    )
+    sender_display = (
+        current_user.get("full_name") if unlocked
+        else generate_anonymous_id(current_user["id"])
+    )
+    receiver_display = (
+        receiver.get("full_name") if unlocked
+        else generate_anonymous_id(message.receiver_id)
+    )
+
     msg_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
-    
+
     msg_doc = {
         "id": msg_id,
         "sender_id": current_user["id"],
-        "sender_name": current_user["full_name"],
+        "sender_name": sender_display,
         "receiver_id": message.receiver_id,
-        "receiver_name": receiver["full_name"],
-        "content": sanitize_string(message.content, 2000),
+        "receiver_name": receiver_display,
+        "content": clean_content,
         "product_id": message.product_id,
         "is_read": False,
         "created_at": now
     }
-    
+
     await db.messages.insert_one(msg_doc)
     return MessageResponse(**msg_doc)
 
@@ -1808,16 +2231,29 @@ async def get_messages(partner_id: str, current_user: dict = Depends(get_current
     messages = await db.messages.find({
         "$or": [
             {"sender_id": current_user["id"], "receiver_id": partner_id},
-            {"sender_id": partner_id, "receiver_id": current_user["id"]}
+            {"sender_id": partner_id, "receiver_id": current_user["id"]},
+            # Messages système renvoyés à l'utilisateur courant
+            {"sender_id": "system", "receiver_id": current_user["id"]}
         ]
-    }, {"_id": 0}).sort("created_at", 1).to_list(100)
-    
-    # Mark as read
+    }, {"_id": 0}).sort("created_at", 1).to_list(200)
+
+    # Vérifier si le contact est débloqué (commande payée)
+    unlocked = await buyer_has_paid_order_with_supplier(db, current_user["id"], partner_id)
+
+    # Anonymiser les noms si contact non débloqué
+    if not unlocked:
+        for msg in messages:
+            if msg.get("sender_id") not in (current_user["id"], "system"):
+                msg["sender_name"] = generate_anonymous_id(msg["sender_id"])
+            if msg.get("receiver_id") == partner_id:
+                msg["receiver_name"] = generate_anonymous_id(partner_id)
+
+    # Marquer comme lus
     await db.messages.update_many(
         {"sender_id": partner_id, "receiver_id": current_user["id"], "is_read": False},
         {"$set": {"is_read": True}}
     )
-    
+
     return messages
 
 # ======================= BLOG ENDPOINTS =======================
@@ -1845,6 +2281,8 @@ async def get_blog_post(post_id: str):
 
 @api_router.post("/blog", response_model=BlogPostResponse)
 async def create_blog_post(post: BlogPostCreate, current_user: dict = Depends(get_current_user)):
+    if current_user.get("user_type") not in ["supplier", "admin"]:
+        raise HTTPException(status_code=403, detail="Seuls les fournisseurs et admins peuvent publier des articles")
     post_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     
@@ -1910,7 +2348,7 @@ async def rate_supplier(supplier_id: str, rating: SupplierRatingCreate, current_
     await db.supplier_ratings.insert_one(rating_doc)
     
     # Update supplier's average rating
-    all_ratings = await db.supplier_ratings.find({"supplier_id": supplier_id}, {"_id": 0}).to_list(1000)
+    all_ratings = await db.supplier_ratings.find({"supplier_id": supplier_id}, {"_id": 0}).to_list(500)
     if all_ratings:
         avg_rating = sum(r["rating"] for r in all_ratings) / len(all_ratings)
         avg_comm = sum(r["communication_rating"] for r in all_ratings) / len(all_ratings)
@@ -1946,21 +2384,40 @@ async def get_supplier_ratings(supplier_id: str):
     return ratings
 
 @api_router.get("/suppliers/{supplier_id}/profile", response_model=SupplierProfileResponse)
-async def get_supplier_profile(supplier_id: str):
-    """Get supplier profile with ratings"""
+async def get_supplier_profile(
+    supplier_id: str,
+    current_user: dict = Depends(get_current_user_optional)
+):
+    """Get supplier profile — coordonnées masquées avant paiement."""
     supplier = await db.users.find_one({"id": supplier_id, "user_type": "supplier"}, {"_id": 0})
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
-    
+
     products_count = await db.products.count_documents({"supplier_id": supplier_id})
     orders_completed = await db.orders.count_documents({"supplier_id": supplier_id, "status": "delivered"})
-    
+
+    # Vérifier si le visiteur a une commande payée avec ce fournisseur
+    contact_unlocked = False
+    if current_user:
+        contact_unlocked = await buyer_has_paid_order_with_supplier(
+            db, current_user["id"], supplier_id
+        )
+
+    if contact_unlocked:
+        display_name = supplier.get("full_name", "")
+        company = supplier.get("company_name")
+        city = supplier.get("city")
+    else:
+        display_name = generate_anonymous_id(supplier_id)
+        company = None   # masqué
+        city = None      # masqué — seul le pays visible
+
     return SupplierProfileResponse(
         id=supplier["id"],
-        full_name=supplier["full_name"],
-        company_name=supplier.get("company_name"),
+        full_name=display_name,
+        company_name=company,
         country=supplier.get("country"),
-        city=supplier.get("city"),
+        city=city,
         rating=supplier.get("supplier_rating", 0.0),
         rating_count=supplier.get("rating_count", 0),
         communication_avg=supplier.get("communication_avg", 0.0),
@@ -1997,10 +2454,11 @@ async def get_suppliers(sort_by: str = "rating", limit: int = 20):
     result = [
         SupplierProfileResponse(
             id=s["id"],
-            full_name=s["full_name"],
-            company_name=s.get("company_name"),
+            # Nom/entreprise anonymes dans la liste publique — débloqués après paiement
+            full_name=generate_anonymous_id(s["id"]),
+            company_name=None,
             country=s.get("country"),
-            city=s.get("city"),
+            city=None,  # ville masquée dans la liste
             rating=s.get("supplier_rating", 0.0),
             rating_count=s.get("rating_count", 0),
             communication_avg=s.get("communication_avg", 0.0),
@@ -2026,28 +2484,49 @@ async def get_supplier_stats(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Only suppliers can access this")
     
     products_count = await db.products.count_documents({"supplier_id": current_user["id"]})
-    orders = await db.orders.find({"supplier_id": current_user["id"]}, {"_id": 0}).to_list(1000)
-    rfqs = await db.rfqs.find({"supplier_id": current_user["id"]}, {"_id": 0}).to_list(1000)
-    
-    total_revenue = sum(o.get("total", 0) for o in orders if o.get("payment_status") == "paid")
-    pending_orders = sum(1 for o in orders if o.get("status") == "pending")
-    completed_orders = sum(1 for o in orders if o.get("status") == "delivered")
-    pending_rfqs = sum(1 for r in rfqs if r.get("status") == "pending")
-    
+    sid = current_user["id"]
+    # Aggregations pour éviter le chargement de tous les documents en mémoire
+    order_pipeline = [
+        {"$match": {"supplier_id": sid}},
+        {"$group": {
+            "_id": None,
+            "total_orders": {"$sum": 1},
+            "pending_orders": {"$sum": {"$cond": [{"$eq": ["$status", "pending"]}, 1, 0]}},
+            "completed_orders": {"$sum": {"$cond": [{"$eq": ["$status", "delivered"]}, 1, 0]}},
+            "total_revenue": {"$sum": {"$cond": [{"$eq": ["$payment_status", "paid"]}, "$total", 0]}}
+        }}
+    ]
+    order_stats = None
+    async for doc in db.orders.aggregate(order_pipeline):
+        order_stats = doc
+
+    rfq_pipeline = [
+        {"$match": {"supplier_id": sid}},
+        {"$group": {
+            "_id": None,
+            "total_rfqs": {"$sum": 1},
+            "pending_rfqs": {"$sum": {"$cond": [{"$eq": ["$status", "pending"]}, 1, 0]}}
+        }}
+    ]
+    rfq_stats = None
+    async for doc in db.rfqs.aggregate(rfq_pipeline):
+        rfq_stats = doc
+
     return {
         "products_count": products_count,
-        "total_orders": len(orders),
-        "pending_orders": pending_orders,
-        "completed_orders": completed_orders,
-        "total_revenue": total_revenue,
-        "pending_rfqs": pending_rfqs,
-        "total_rfqs": len(rfqs)
+        "total_orders": order_stats["total_orders"] if order_stats else 0,
+        "pending_orders": order_stats["pending_orders"] if order_stats else 0,
+        "completed_orders": order_stats["completed_orders"] if order_stats else 0,
+        "total_revenue": order_stats["total_revenue"] if order_stats else 0,
+        "pending_rfqs": rfq_stats["pending_rfqs"] if rfq_stats else 0,
+        "total_rfqs": rfq_stats["total_rfqs"] if rfq_stats else 0
     }
 
 # ======================= RFQ (REQUEST FOR QUOTE) ENDPOINTS =======================
 
 @api_router.post("/rfq", response_model=RFQResponse)
-async def create_rfq(rfq: RFQCreate, current_user: dict = Depends(get_current_user)):
+@limiter.limit("10/minute")
+async def create_rfq(request: Request, rfq: RFQCreate, current_user: dict = Depends(get_current_user)):
     """Create a Request for Quote"""
     product = await db.products.find_one({"id": rfq.product_id}, {"_id": 0})
     if not product:
@@ -2061,23 +2540,40 @@ async def create_rfq(rfq: RFQCreate, current_user: dict = Depends(get_current_us
     rfq_number = f"RFQ-{datetime.now().strftime('%Y%m%d')}-{rfq_id[:8].upper()}"
     now = datetime.now(timezone.utc).isoformat()
     
+    # Anti-contournement : scanner notes et specifications
+    rfq_notes = rfq.notes or ""
+    rfq_specs = rfq.specifications or ""
+    for field_text in [rfq_notes, rfq_specs]:
+        bypass = detect_bypass(field_text)
+        if bypass["blocked"]:
+            raise HTTPException(
+                status_code=400,
+                detail="Votre demande de devis contient des coordonnées personnelles. "
+                       "Retirez tout numéro de téléphone, email ou lien externe. "
+                       "Les contacts sont partagés automatiquement après paiement."
+            )
+
     rfq_doc = {
         "id": rfq_id,
         "rfq_number": rfq_number,
         "product_id": rfq.product_id,
         "product_name": product["name"],
         "supplier_id": rfq.supplier_id,
-        "supplier_name": supplier["full_name"],
+        # Fournisseur anonyme pour l'acheteur avant paiement
+        "supplier_name": generate_anonymous_id(rfq.supplier_id),
+        "supplier_name_real": supplier["full_name"],  # stocké mais masqué
         "buyer_id": current_user["id"],
-        "buyer_name": current_user["full_name"],
-        "buyer_company": current_user.get("company_name"),
+        # Acheteur anonyme pour le fournisseur avant paiement
+        "buyer_name": generate_anonymous_id(current_user["id"]),
+        "buyer_name_real": current_user["full_name"],  # stocké mais masqué
+        "buyer_company": None,  # masqué
         "quantity": rfq.quantity,
         "target_price": rfq.target_price,
         "quoted_price": None,
-        "delivery_location": rfq.delivery_location,
+        "delivery_location": sanitize_string(rfq.delivery_location, 200),
         "delivery_deadline": rfq.delivery_deadline,
-        "specifications": rfq.specifications,
-        "notes": rfq.notes,
+        "specifications": sanitize_string(rfq_specs, 1000) if rfq_specs else None,
+        "notes": sanitize_string(rfq_notes, 500) if rfq_notes else None,
         "status": "pending",
         "supplier_response": None,
         "created_at": now,
@@ -2115,7 +2611,8 @@ async def get_rfq(rfq_id: str, current_user: dict = Depends(get_current_user)):
     return rfq
 
 @api_router.post("/rfq/{rfq_id}/quote", response_model=RFQResponse)
-async def submit_quote(rfq_id: str, quote: RFQQuote, current_user: dict = Depends(get_current_user)):
+@limiter.limit("10/minute")
+async def submit_quote(request: Request, rfq_id: str, quote: RFQQuote, current_user: dict = Depends(get_current_user)):
     """Supplier submits a quote for an RFQ"""
     rfq = await db.rfqs.find_one({"id": rfq_id}, {"_id": 0})
     if not rfq:
@@ -2148,7 +2645,8 @@ async def submit_quote(rfq_id: str, quote: RFQQuote, current_user: dict = Depend
     return RFQResponse(**updated_rfq)
 
 @api_router.post("/rfq/{rfq_id}/accept")
-async def accept_quote(rfq_id: str, current_user: dict = Depends(get_current_user)):
+@limiter.limit("10/minute")
+async def accept_quote(request: Request, rfq_id: str, current_user: dict = Depends(get_current_user)):
     """Buyer accepts a quote"""
     rfq = await db.rfqs.find_one({"id": rfq_id}, {"_id": 0})
     if not rfq:
@@ -2177,7 +2675,8 @@ async def accept_quote(rfq_id: str, current_user: dict = Depends(get_current_use
     return {"message": "Quote accepted"}
 
 @api_router.post("/rfq/{rfq_id}/reject")
-async def reject_quote(rfq_id: str, current_user: dict = Depends(get_current_user)):
+@limiter.limit("10/minute")
+async def reject_quote(request: Request, rfq_id: str, current_user: dict = Depends(get_current_user)):
     """Buyer rejects a quote"""
     rfq = await db.rfqs.find_one({"id": rfq_id}, {"_id": 0})
     if not rfq:
@@ -2275,15 +2774,31 @@ async def confirm_mobile_money_payment(transaction_id: str, current_user: dict =
         {"$set": {"status": "completed", "completed_at": datetime.now(timezone.utc).isoformat()}}
     )
     
-    # Create order notification
+    # Mettre à jour les commandes en attente (mobile money)
+    await db.orders.update_many(
+        {
+            "buyer_id": current_user["id"],
+            "payment_status": "pending",
+            "payment_method": "mobile_money"
+        },
+        {"$set": {"payment_status": "paid", "status": "confirmed"}}
+    )
+
+    # Vider le panier après paiement confirmé
+    await db.carts.update_one(
+        {"user_id": current_user["id"]},
+        {"$set": {"items": []}}
+    )
+
+    # Notification paiement
     await create_notification(
         user_id=current_user["id"],
         type="order",
         title="Paiement confirmé",
-        message=f"Votre paiement Mobile Money de {transaction['amount']:,.0f} XAF a été confirmé",
+        message=f"Votre paiement Mobile Money de {transaction['amount']:,.0f} XAF a été confirmé. Vos commandes sont en cours de traitement.",
         related_id=transaction_id
     )
-    
+
     return {"message": "Payment confirmed", "status": "completed"}
 
 # ======================= NOTIFICATIONS ENDPOINTS =======================
@@ -2382,7 +2897,7 @@ async def create_review(review: ReviewCreate, current_user: dict = Depends(get_c
     await db.reviews.insert_one(review_doc)
     
     # Update product rating
-    reviews = await db.reviews.find({"product_id": review.product_id}, {"_id": 0}).to_list(1000)
+    reviews = await db.reviews.find({"product_id": review.product_id}, {"_id": 0}).to_list(500)
     avg_rating = sum(r["rating"] for r in reviews) / len(reviews)
     await db.products.update_one(
         {"id": review.product_id},
@@ -2431,11 +2946,430 @@ async def get_pending_reviews(current_user: dict = Depends(get_current_user)):
     
     return pending_reviews
 
+
+@api_router.get("/contacts/{partner_id}/unlock-status")
+async def get_contact_unlock_status(
+    partner_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Vérifie si le contact d'un partenaire est débloqué pour l'utilisateur courant.
+    Retourne les coordonnées réelles si une commande payée existe.
+    """
+    partner = await db.users.find_one({"id": partner_id}, {"_id": 0})
+    if not partner:
+        raise HTTPException(status_code=404, detail="Partenaire introuvable")
+
+    info = await get_contact_info_if_unlocked(db, current_user["id"], partner)
+    return info
+
+
+# ── Bypass attempts — admin only ─────────────────────────────────────────────
+# Remplacer l'endpoint /bypass-attempts/mine existant :
+@api_router.get("/admin/bypass-attempts")
+async def admin_bypass_attempts(current_user: dict = Depends(get_current_user)):
+    if current_user.get("user_type") != "admin":
+        raise HTTPException(status_code=403, detail="Admins uniquement")
+    attempts = await db.bypass_attempts.find({}, {"_id": 0}).sort("created_at", -1).limit(200).to_list(200)
+    return attempts
+
+# ═══════════════════════════════════════════════════════════════════════════════
+## ADD — INVOICE PDF ENDPOINT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _build_invoice_pdf(order: dict, buyer: dict, supplier_name: str) -> bytes:
+    """Génère une facture PDF professionnelle pour une commande payée."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+    from io import BytesIO
+    from datetime import datetime, timezone
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4,
+        leftMargin=20*mm, rightMargin=20*mm, topMargin=15*mm, bottomMargin=15*mm)
+
+    styles = getSampleStyleSheet()
+    PRIMARY = colors.HexColor("#034168")
+    ACCENT  = colors.HexColor("#FF6A00")
+    LIGHT   = colors.HexColor("#F0F4F8")
+
+    body  = ParagraphStyle("body",  parent=styles["Normal"], fontSize=9, leading=13, textColor=colors.HexColor("#333333"))
+    small = ParagraphStyle("small", parent=styles["Normal"], fontSize=7.5, textColor=colors.HexColor("#666666"))
+    bold  = ParagraphStyle("bold",  parent=styles["Normal"], fontSize=9, fontName="Helvetica-Bold", textColor=PRIMARY)
+    title = ParagraphStyle("title", parent=styles["Heading1"], fontSize=14, textColor=PRIMARY, fontName="Helvetica-Bold")
+
+    now_str = datetime.now(timezone.utc).strftime("%d/%m/%Y")
+    story   = []
+
+    # ── En-tête ──────────────────────────────────────────────────────────────
+    hdr = Table([[
+        Paragraph('<font color="#034168" size="14"><b>AfriSupply</b></font><br/>'
+                  '<font color="#888888" size="8">Marketplace B2B Industrielle — Zone CEMAC</font>', body),
+        Paragraph(f'<font color="#FF6A00" size="12"><b>FACTURE</b></font><br/>'
+                  f'<font color="#666666" size="8">N° {order.get("order_number","")}</font><br/>'
+                  f'<font color="#999999" size="7">Émise le {now_str}</font>',
+                  ParagraphStyle("r", parent=body, alignment=2)),
+    ]], colWidths=[95*mm, 75*mm])
+    hdr.setStyle(TableStyle([
+        ("VALIGN",     (0,0), (-1,-1), "MIDDLE"),
+        ("LINEBELOW",  (0,0), (-1,-1), 1.5, ACCENT),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 8),
+    ]))
+    story.append(hdr)
+    story.append(Spacer(1, 6*mm))
+
+    # ── Parties ──────────────────────────────────────────────────────────────
+    parties = Table([[
+        Paragraph(f"<b>VENDEUR</b><br/>{supplier_name}<br/>Via AfriSupply", body),
+        Paragraph(f"<b>ACHETEUR</b><br/>{buyer.get('full_name','')}<br/>"
+                  f"{buyer.get('company_name','')}<br/>{buyer.get('city','')}, {buyer.get('country','')}", body),
+    ]], colWidths=[85*mm, 85*mm])
+    parties.setStyle(TableStyle([
+        ("BACKGROUND",    (0,0), (-1,-1), LIGHT),
+        ("GRID",          (0,0), (-1,-1), 0.3, colors.white),
+        ("TOPPADDING",    (0,0), (-1,-1), 8),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 8),
+        ("LEFTPADDING",   (0,0), (-1,-1), 10),
+        ("VALIGN",        (0,0), (-1,-1), "TOP"),
+    ]))
+    story.append(parties)
+    story.append(Spacer(1, 6*mm))
+
+    # ── Tableau articles ─────────────────────────────────────────────────────
+    headers = [["Désignation", "Qté", "Unité", "PU (XAF)", "Total (XAF)"]]
+    rows = []
+    for item in order.get("items", []):
+        rows.append([
+            Paragraph(item.get("product_name", ""), body),
+            str(item.get("quantity", "")),
+            item.get("unit", ""),
+            f"{item.get('price', 0):,.0f}",
+            f"{item.get('subtotal', 0):,.0f}",
+        ])
+
+    items_table = Table(
+        [[Paragraph(h, ParagraphStyle("th", parent=body, fontName="Helvetica-Bold", textColor=colors.white)) for h in headers[0]]] + rows,
+        colWidths=[80*mm, 18*mm, 18*mm, 27*mm, 27*mm]
+    )
+    items_table.setStyle(TableStyle([
+        ("BACKGROUND",    (0,0), (-1,0), PRIMARY),
+        ("ROWBACKGROUNDS",(0,1), (-1,-1), [colors.white, LIGHT]),
+        ("GRID",          (0,0), (-1,-1), 0.3, colors.HexColor("#CCCCCC")),
+        ("ALIGN",         (1,0), (-1,-1), "CENTER"),
+        ("ALIGN",         (3,0), (-1,-1), "RIGHT"),
+        ("TOPPADDING",    (0,0), (-1,-1), 5),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 5),
+        ("LEFTPADDING",   (0,0), (-1,-1), 5),
+    ]))
+    story.append(items_table)
+    story.append(Spacer(1, 4*mm))
+
+    # ── Total ─────────────────────────────────────────────────────────────────
+    total_tbl = Table([[
+        "",
+        Paragraph(f"<b>TOTAL HT : {order.get('total', 0):,.0f} XAF</b>",
+                  ParagraphStyle("tot", parent=body, fontName="Helvetica-Bold", fontSize=11, textColor=PRIMARY, alignment=2))
+    ]], colWidths=[110*mm, 60*mm])
+    story.append(total_tbl)
+    story.append(Spacer(1, 6*mm))
+
+    # ── Pied ─────────────────────────────────────────────────────────────────
+    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#CCCCCC")))
+    story.append(Spacer(1, 2*mm))
+    story.append(Paragraph(
+        f"Facture générée par AfriSupply — Marketplace B2B Zone CEMAC. "
+        f"Document non contractuel — Référence commande : {order.get('order_number','')} — Paiement : {order.get('payment_method','').upper()}",
+        small
+    ))
+
+    doc.build(story)
+    return buffer.getvalue()
+
+
+@api_router.get("/orders/{order_id}/invoice")
+@limiter.limit("10/minute")
+async def get_order_invoice(
+    request: Request,
+    order_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Génère et retourne la facture PDF d'une commande payée."""
+    from starlette.responses import Response as StarletteResponse
+
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Commande introuvable")
+    if order["buyer_id"] != current_user["id"] and order["supplier_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Accès refusé")
+    if order.get("payment_status") != "paid":
+        raise HTTPException(status_code=400, detail="Facture disponible uniquement pour les commandes payées")
+
+    buyer    = await db.users.find_one({"id": order["buyer_id"]}, {"_id": 0}) or {}
+    supplier = await db.users.find_one({"id": order["supplier_id"]}, {"_id": 0}) or {}
+    supplier_name = supplier.get("company_name") or supplier.get("full_name") or "Fournisseur AfriSupply"
+
+    pdf_bytes = _build_invoice_pdf(order, buyer, supplier_name)
+    filename  = f"Facture_AfriSupply_{order.get('order_number','').replace('-','_')}.pdf"
+
+    return StarletteResponse(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+# ======================= FICHE PRODUIT INDUSTRIELLE =======================
+
+PRODUCT_SHEET_DIR = Path("uploads/product_sheets")
+PRODUCT_SHEET_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _build_product_sheet_pdf(product: dict, supplier: dict, include_supplier_id: bool) -> bytes:
+    """
+    Génère une fiche produit industrielle conforme aux standards B2B
+    (compatible validation TotalEnergies, PERENCO, sociétés BTP, etc.)
+    """
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=20*mm, rightMargin=20*mm,
+        topMargin=15*mm, bottomMargin=15*mm,
+        title=f"Fiche Produit — {product.get('name', '')}",
+        author="AfriSupply",
+        subject="Fiche technique industrielle",
+    )
+
+    styles = getSampleStyleSheet()
+    PRIMARY = colors.HexColor("#034168")
+    ACCENT  = colors.HexColor("#FF6A00")
+    LIGHT   = colors.HexColor("#F0F4F8")
+
+    title_style = ParagraphStyle(
+        "Title", parent=styles["Heading1"],
+        fontSize=16, textColor=PRIMARY, spaceAfter=4,
+        fontName="Helvetica-Bold",
+    )
+    section_style = ParagraphStyle(
+        "Section", parent=styles["Heading2"],
+        fontSize=10, textColor=colors.white,
+        fontName="Helvetica-Bold", spaceAfter=0, spaceBefore=0,
+    )
+    body_style = ParagraphStyle(
+        "Body", parent=styles["Normal"],
+        fontSize=9, leading=14, textColor=colors.HexColor("#333333"),
+    )
+    small_style = ParagraphStyle(
+        "Small", parent=styles["Normal"],
+        fontSize=7.5, textColor=colors.HexColor("#666666"),
+    )
+    label_style = ParagraphStyle(
+        "Label", parent=styles["Normal"],
+        fontSize=8.5, fontName="Helvetica-Bold", textColor=PRIMARY,
+    )
+
+    def section_header(text):
+        tbl = Table([[Paragraph(f"  {text}", section_style)]], colWidths=[170*mm])
+        tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,-1), PRIMARY),
+            ("TOPPADDING",    (0,0), (-1,-1), 4),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+        ]))
+        return tbl
+
+    def kv_table(rows, col_w=(70, 100)):
+        data = []
+        for label, value in rows:
+            data.append([
+                Paragraph(label, label_style),
+                Paragraph(str(value) if value not in (None, "") else "N/A", body_style),
+            ])
+        tbl = Table(data, colWidths=[c*mm for c in col_w])
+        tbl.setStyle(TableStyle([
+            ("ROWBACKGROUNDS", (0,0), (-1,-1), [colors.white, LIGHT]),
+            ("GRID",    (0,0), (-1,-1), 0.3, colors.HexColor("#CCCCCC")),
+            ("VALIGN",  (0,0), (-1,-1), "TOP"),
+            ("TOPPADDING",    (0,0), (-1,-1), 4),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+            ("LEFTPADDING",   (0,0), (-1,-1), 5),
+        ]))
+        return tbl
+
+    story = []
+    now_str = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M UTC")
+
+    # ── EN-TÊTE ───────────────────────────────────────────────────────────────
+    header_data = [[
+        Paragraph(
+            f'<font color="#034168" size="14"><b>AfriSupply</b></font><br/>'
+            f'<font color="#666666" size="8">Marketplace B2B Industrielle — Zone CEMAC</font>',
+            body_style
+        ),
+        Paragraph(
+            f'<font color="#FF6A00" size="11"><b>FICHE PRODUIT</b></font><br/>'
+            f'<font color="#666666" size="7">Document de référence — Usage professionnel</font><br/>'
+            f'<font color="#999999" size="7">Émise le {now_str}</font>',
+            ParagraphStyle("right", parent=body_style, alignment=2)
+        ),
+    ]]
+    hdr_tbl = Table(header_data, colWidths=[95*mm, 75*mm])
+    hdr_tbl.setStyle(TableStyle([
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+        ("LINEBELOW", (0,0), (-1,-1), 1.5, ACCENT),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 8),
+    ]))
+    story.append(hdr_tbl)
+    story.append(Spacer(1, 6*mm))
+
+    # ── DÉSIGNATION PRODUIT ───────────────────────────────────────────────────
+    story.append(Paragraph(product.get("name", "Produit sans nom"), title_style))
+    if product.get("description"):
+        story.append(Paragraph(product["description"][:500], body_style))
+    story.append(Spacer(1, 4*mm))
+
+    # ── IDENTIFICATION ────────────────────────────────────────────────────────
+    story.append(section_header("1. IDENTIFICATION DU PRODUIT"))
+    story.append(Spacer(1, 1*mm))
+    id_rows = [
+        ("Référence AfriSupply",  product.get("id", "")[:16].upper()),
+        ("Désignation",           product.get("name", "")),
+        ("Catégorie",             product.get("category_name", "N/A")),
+        ("Unité de vente",        product.get("unit", "N/A")),
+        ("Qté min. commande",     f"{product.get('min_order_quantity', 1)} {product.get('unit', '')}"),
+        ("Stock disponible",      f"{product.get('stock_quantity', 0)} {product.get('unit', '')}"),
+        ("Prix unitaire (XAF)",   f"{product.get('price', 0):,.0f} XAF HT"),
+        ("Disponibilité",         "✓ En stock" if product.get("is_available") else "✗ Rupture"),
+    ]
+    story.append(kv_table(id_rows))
+    story.append(Spacer(1, 4*mm))
+
+    # ── SPÉCIFICATIONS TECHNIQUES ─────────────────────────────────────────────
+    specs = product.get("specifications") or {}
+    story.append(section_header("2. SPÉCIFICATIONS TECHNIQUES"))
+    story.append(Spacer(1, 1*mm))
+    if isinstance(specs, dict) and specs:
+        spec_rows = [(k.replace("_", " ").title(), v) for k, v in specs.items()]
+        story.append(kv_table(spec_rows))
+    else:
+        story.append(Paragraph(
+            "Spécifications détaillées disponibles sur demande auprès du fournisseur via AfriSupply.",
+            ParagraphStyle("italic", parent=body_style, textColor=colors.HexColor("#888888"))
+        ))
+    story.append(Spacer(1, 4*mm))
+
+    # ── INFORMATIONS FOURNISSEUR ──────────────────────────────────────────────
+    story.append(section_header("3. INFORMATIONS FOURNISSEUR"))
+    story.append(Spacer(1, 1*mm))
+    if include_supplier_id:
+        supplier_rows = [
+            ("Fournisseur",       supplier.get("company_name") or supplier.get("full_name", "")),
+            ("Pays",              supplier.get("country", "N/A")),
+            ("Ville",             supplier.get("city", "N/A")),
+            ("Statut",            "✓ Fournisseur vérifié AfriSupply"),
+            ("Commande via",      "afrisupply.com — Messagerie interne sécurisée"),
+        ]
+    else:
+        supplier_rows = [
+            ("Fournisseur",       generate_anonymous_id(product.get("supplier_id", ""))),
+            ("Pays",              supplier.get("country", "N/A")),
+            ("Statut",            "✓ Fournisseur vérifié AfriSupply"),
+            ("Contact",           "Via plateforme AfriSupply uniquement"),
+        ]
+    story.append(kv_table(supplier_rows))
+    story.append(Spacer(1, 4*mm))
+
+    # ── CONDITIONS COMMERCIALES ───────────────────────────────────────────────
+    story.append(section_header("4. CONDITIONS COMMERCIALES"))
+    story.append(Spacer(1, 1*mm))
+    comm_rows = [
+        ("Paiement acceptés",  "Mobile Money (MTN, Orange, Airtel) • Carte bancaire (Visa/MC)"),
+        ("Zone de livraison",  "Cameroun, Gabon, Congo, Tchad, Guinée Équatoriale, Centrafrique"),
+        ("Demande de devis",   "Disponible via AfriSupply (RFQ en 24h)"),
+        ("Retours / Litiges",  "Selon conditions générales AfriSupply — support@afrisupply.com"),
+        ("Devise",             "XAF (Franc CFA CEMAC) — Prix HT"),
+    ]
+    story.append(kv_table(comm_rows))
+    story.append(Spacer(1, 4*mm))
+
+    # ── AVIS & NOTATION ───────────────────────────────────────────────────────
+    if product.get("rating", 0) > 0:
+        story.append(section_header("5. ÉVALUATION ACHETEURS"))
+        story.append(Spacer(1, 1*mm))
+        stars = "★" * round(product["rating"]) + "☆" * (5 - round(product["rating"]))
+        rating_rows = [
+            ("Note globale",    f"{product['rating']:.1f} / 5  {stars}"),
+            ("Nombre d'avis",   str(product.get("review_count", 0))),
+        ]
+        story.append(kv_table(rating_rows))
+        story.append(Spacer(1, 4*mm))
+
+    # ── PIED DE PAGE ──────────────────────────────────────────────────────────
+    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#CCCCCC")))
+    story.append(Spacer(1, 2*mm))
+    disclaimer = (
+        "Ce document est généré automatiquement par AfriSupply — Marketplace B2B Industrielle Zone CEMAC. "
+        "Les informations contenues sont fournies à titre indicatif. AfriSupply garantit la vérification "
+        "des fournisseurs référencés mais décline toute responsabilité sur les spécifications techniques "
+        "qui relèvent de la responsabilité du fabricant. Document non contractuel. "
+        f"Référence : AS-PS-{product.get('id', '')[:8].upper()} — {now_str}"
+    )
+    story.append(Paragraph(disclaimer, small_style))
+
+    doc.build(story)
+    return buffer.getvalue()
+
+
+@api_router.get("/products/{product_id}/sheet")
+@limiter.limit("20/minute")
+async def get_product_sheet(
+    request: Request,
+    product_id: str,
+    current_user: dict = Depends(get_current_user_optional)
+):
+    """
+    Génère et retourne la fiche produit industrielle au format PDF.
+    - Utilisateur non connecté ou sans commande : fournisseur anonymisé
+    - Utilisateur avec commande payée : nom fournisseur visible (pas coordonnées)
+    """
+    from fastapi.responses import Response as FastAPIResponse
+
+    product = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Produit non trouvé")
+
+    supplier = await db.users.find_one({"id": product.get("supplier_id")}, {"_id": 0}) or {}
+    category = await db.categories.find_one({"id": product.get("category_id")}, {"_id": 0}) or {}
+    product["category_name"] = category.get("name")
+
+    # Vérifier si l'utilisateur a une commande payée avec ce fournisseur
+    include_supplier_id = False
+    if current_user:
+        include_supplier_id = await buyer_has_paid_order_with_supplier(
+            db, current_user["id"], product.get("supplier_id", "")
+        )
+
+    # Générer le PDF
+    pdf_bytes = _build_product_sheet_pdf(product, supplier, include_supplier_id)
+
+    # Nom de fichier propre
+    safe_name = re.sub(r"[^a-zA-Z0-9_-]", "_", product.get("name", "produit"))[:40]
+    filename = f"AfriSupply_FicheProduit_{safe_name}_{product_id[:8].upper()}.pdf"
+
+    return FastAPIResponse(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # ======================= WEBSOCKET FOR CHAT =======================
 
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, WebSocket] = {}
+        self.rate_limits: Dict[str, dict] = {}
     
     async def connect(self, websocket: WebSocket, user_id: str):
         await websocket.accept()
@@ -2470,33 +3404,62 @@ async def websocket_chat(websocket: WebSocket, token: str):
             
             if data.get("type") == "message":
                 receiver_id = data.get("receiver_id")
-                content = data.get("content")
-                
-                # Save message
+                raw_content = data.get("content", "")
+                content = sanitize_string(str(raw_content), 2000) if raw_content else ""
+                if not content:
+                    continue
+
+                # ── Anti-contournement WS ─────────────────────────────────
+                bypass_check = detect_bypass(content)
                 user = await db.users.find_one({"id": user_id}, {"_id": 0})
                 receiver = await db.users.find_one({"id": receiver_id}, {"_id": 0})
-                
-                if receiver:
+
+                if bypass_check["blocked"]:
+                    now_b = datetime.now(timezone.utc).isoformat()
+                    block_msg = {
+                        "id": str(uuid.uuid4()),
+                        "sender_id": "system",
+                        "sender_name": "AfriSupply",
+                        "receiver_id": user_id,
+                        "receiver_name": user.get("full_name", "") if user else "",
+                        "content": BLOCKED_MESSAGE_TEXT,
+                        "is_read": False,
+                        "is_system": True,
+                        "created_at": now_b,
+                    }
+                    await db.bypass_attempts.insert_one({
+                        "user_id": user_id,
+                        "target_id": receiver_id,
+                        "original_content": content,
+                        "reason": "ws_bypass",
+                        "created_at": now_b,
+                    })
+                    await db.messages.insert_one(block_msg)
+                    await websocket.send_json({"type": "blocked", "message": block_msg})
+                    continue
+
+                if receiver and user:
+                    # Anonymisation selon statut paiement
+                    unlocked = await buyer_has_paid_order_with_supplier(db, user_id, receiver_id)
+                    sender_display = user.get("full_name", "") if unlocked else generate_anonymous_id(user_id)
+                    receiver_display = receiver.get("full_name", "") if unlocked else generate_anonymous_id(receiver_id)
+
                     msg_id = str(uuid.uuid4())
                     now = datetime.now(timezone.utc).isoformat()
-                    
+
                     msg_doc = {
                         "id": msg_id,
                         "sender_id": user_id,
-                        "sender_name": user.get("full_name"),
+                        "sender_name": sender_display,
                         "receiver_id": receiver_id,
-                        "receiver_name": receiver.get("full_name"),
+                        "receiver_name": receiver_display,
                         "content": content,
                         "is_read": False,
-                        "created_at": now
+                        "created_at": now,
                     }
-                    
+
                     await db.messages.insert_one(msg_doc)
-                    
-                    # Send to receiver if online
                     await manager.send_personal_message(msg_doc, receiver_id)
-                    
-                    # Send confirmation to sender
                     await websocket.send_json({"type": "sent", "message": msg_doc})
     
     except WebSocketDisconnect:
@@ -2517,7 +3480,7 @@ async def health():
 @api_router.post("/seed")
 async def seed_data():
     """Seed initial categories and sample data — disabled in production"""
-    if os.environ.get("ENVIRONMENT", "development").lower() == "production":
+    if os.environ.get("ENVIRONMENT", "development").lower() != "development":
         raise HTTPException(status_code=403, detail="Seed disabled in production")
     
     # Check if already seeded — on vérifie les PRODUITS au lieu des catégories
@@ -2746,7 +3709,7 @@ app.include_router(api_router)
 # CORS — restreindre aux origines connues en production
 ALLOWED_ORIGINS = os.environ.get(
     "ALLOWED_ORIGINS",
-    "http://localhost:3001,https://afri-supply-production.up.railway.app,https://afri-supply.vercel.app, https://www.afrisupply.com"
+    "http://localhost:3000,https://afrisupply.com,https://www.afrisupply.com"
 ).split(",")
 
 app.add_middleware(
@@ -2776,7 +3739,21 @@ async def startup_db_indexes():
     await db.messages.create_index([("sender_id", 1), ("receiver_id", 1), ("created_at", 1)])
     await db.reviews.create_index([("product_id", 1)])
     await db.rfqs.create_index([("buyer_id", 1), ("supplier_id", 1)])
-    logger.info("MongoDB indexes created.")
+    await db.bypass_attempts.create_index([("user_id", 1), ("created_at", -1)])
+    await db.carts.create_index([("user_id", 1)])
+    await db.users.create_index([("email", 1)], unique=True, sparse=True)
+    await db.users.create_index([("user_type", 1)])
+    await db.products.create_index([("is_available", 1), ("category_id", 1), ("rating", -1)])
+    await db.orders.create_index([("buyer_id", 1), ("payment_status", 1)])
+    await db.orders.create_index([("supplier_id", 1), ("status", 1)])
+    await db.messages.create_index([("receiver_id", 1), ("is_read", 1)])
+    await db.rfqs.create_index([("status", 1), ("created_at", -1)])
+    await db.supplier_ratings.create_index([("supplier_id", 1)])
+    await db.reviews.create_index([("product_id", 1), ("user_id", 1)])
+    await db.blog_posts.create_index([("created_at", -1)])
+    await db.order_tracking.create_index([("order_id", 1), ("created_at", 1)])
+    await db.order_tracking.create_index([("created_at", -1)])
+    logger.info("MongoDB indexes created — total: 25")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

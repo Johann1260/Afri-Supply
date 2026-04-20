@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext';
 import { useLocale } from '../context/LocaleContext';
 import { messagesAPI } from '../lib/api';
 import { toast } from 'sonner';
+import api, { contactAPI } from '../lib/api';
 
 // P4-21: dériver l'URL WebSocket depuis REACT_APP_BACKEND_URL
 const WS_BASE = (process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000')
@@ -29,6 +30,8 @@ const MessagesPage = () => {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [partnerLoading, setPartnerLoading] = useState(false);
+  const [contactUnlocked, setContactUnlocked] = useState(false);
+  const [contactInfo, setContactInfo] = useState(null);
 
   // P4-21: WebSocket
   const [wsConnected, setWsConnected] = useState(false);
@@ -127,6 +130,7 @@ const MessagesPage = () => {
   useEffect(() => {
     if (!partnerId) return;
     fetchMessages(partnerId);
+    checkContactUnlocked(partnerId);
     const found = conversations.find((c) => c.partner_id === partnerId);
     if (found) setSelectedPartner(found);
   }, [partnerId, conversations]);
@@ -187,6 +191,17 @@ const MessagesPage = () => {
       setMessages(res.data || []);
     } catch (err) {
       console.error('fetchMessages error:', err);
+    }
+  };
+
+  const checkContactUnlocked = async (pid) => {
+    try {
+      const res = await contactAPI.getUnlockStatus(pid);
+      setContactUnlocked(res.data.contact_unlocked);
+      setContactInfo(res.data);
+    } catch {
+      setContactUnlocked(false);
+      setContactInfo(null);
     }
   };
 
@@ -331,19 +346,56 @@ const MessagesPage = () => {
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50">
-                  {messages.map((msg) => (
-                    <div key={msg.id} className={`flex ${msg.sender_id === user?.id ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[70%] rounded-lg p-3 ${
-                        msg.sender_id === user?.id ? 'bg-primary text-white' : 'bg-white border border-slate-200'
-                      }`}>
-                        <p className="break-words">{msg.content}</p>
-                        <p className={`text-xs mt-1 ${msg.sender_id === user?.id ? 'text-white/70' : 'text-slate-400'}`}>
-                          {new Date(msg.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                        </p>
-                      </div>
+                {/* ── Bannière statut contact ─────────────────────────────── */}
+                {contactUnlocked ? (
+                  <div className="bg-green-50 border-b border-green-200 px-4 py-2.5 flex items-center gap-2">
+                    <span className="text-green-600 text-lg">🔓</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-green-800">{t('contact.unlocked')}</p>
+                      <p className="text-xs text-green-700">
+                        {t('contact.unlocked.msg')}
+                      </p>
                     </div>
-                  ))}
+                  </div>
+                ) : (
+                  <div className="bg-amber-50 border-b border-amber-200 px-4 py-2.5 flex items-center gap-2">
+                    <span className="text-amber-600 text-lg">🔒</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-amber-800">{t('contact.locked')}</p>
+                      <p className="text-xs text-amber-700">
+                        Les coordonnées sont partagées automatiquement après votre premier paiement.
+                      </p>
+                    </div>
+                  </div>
+                )}
+                <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50">
+                  {messages.map((msg) => {
+                    const isSystem = msg.sender_id === 'system' || msg.is_system;
+                    const isMine = !isSystem && msg.sender_id === user?.id;
+                    return (
+                      <div key={msg.id} className={`flex ${
+                        isSystem ? 'justify-center' : isMine ? 'justify-end' : 'justify-start'
+                      }`}>
+                        <div className={`rounded-lg p-3 ${
+                          isSystem
+                            ? 'max-w-[90%] bg-red-50 border border-red-200 text-red-800 text-sm'
+                            : isMine
+                            ? 'max-w-[70%] bg-primary text-white'
+                            : 'max-w-[70%] bg-white border border-slate-200'
+                        }`}>
+                          {isSystem && (
+                            <p className="font-semibold text-xs mb-1">{t('contact.bypass.blocked')}</p>
+                          )}
+                          <p className="break-words whitespace-pre-wrap">{msg.content}</p>
+                          <p className={`text-xs mt-1 ${
+                            isSystem ? 'text-red-500' : isMine ? 'text-white/70' : 'text-slate-400'
+                          }`}>
+                            {new Date(msg.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
                   <div ref={messagesEndRef} />
                 </div>
 

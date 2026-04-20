@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   ShoppingCart, Heart, Star, Minus, Plus, MapPin, Package,
-  Truck, Shield, ChatCircle, CaretLeft, FileText
+  Truck, Shield, ChatCircle, CaretLeft, FileText, FilePdf, CheckCircle
 } from '@phosphor-icons/react';
 import { Layout } from '../components/layout';
 import { ProductGrid } from '../components/products';
@@ -37,6 +37,8 @@ const ProductDetailPage = () => {
   const [isFavorite, setIsFavorite] = useState(false);
   const [rfqDialogOpen, setRfqDialogOpen] = useState(false);
   const [contactDialogOpen, setContactDialogOpen] = useState(false);
+  const [downloadingSheet, setDownloadingSheet] = useState(false);
+  const [sheetDownloaded, setSheetDownloaded] = useState(false);
   const [rfqData, setRfqData] = useState({
     quantity: '', target_price: '', delivery_location: '',
     delivery_deadline: '', specifications: '', notes: ''
@@ -118,7 +120,17 @@ const ProductDetailPage = () => {
       toast.success('Message envoyé');
       setContactDialogOpen(false);
       setContactMessage('');
-    } catch { toast.error('Erreur lors de l\'envoi'); }
+    } catch { toast.error("Erreur lors de l'envoi"); }
+  };
+
+  // FIX: downloadSheet simplifié, ouverture dans nouvel onglet
+  const handleDownloadSheet = () => {
+    setDownloadingSheet(true);
+    const url = productsAPI.getProductSheet(product.id);
+    window.open(url, '_blank');
+    setDownloadingSheet(false);
+    setSheetDownloaded(true);
+    setTimeout(() => setSheetDownloaded(false), 3000);
   };
 
   if (loading) {
@@ -157,7 +169,7 @@ const ProductDetailPage = () => {
           <div className="space-y-4">
             <div className="aspect-square bg-slate-100 rounded-lg overflow-hidden">
               {product.images?.[selectedImage] ? (
-                <img src={product.images[selectedImage]} alt={tf(product, 'name')} className="w-full h-full object-cover" />
+                <img src={getImageUrl(product.images[selectedImage])} alt={tf(product, 'name')} className="w-full h-full object-cover" />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-slate-400">
                   <Package className="w-24 h-24" />
@@ -185,7 +197,6 @@ const ProductDetailPage = () => {
               </Link>
             )}
 
-            {/* tf() pour nom et description bilingue */}
             <h1 className="font-heading font-bold text-2xl lg:text-3xl text-slate-900 mt-2 mb-4">
               {tf(product, 'name')}
             </h1>
@@ -281,7 +292,7 @@ const ProductDetailPage = () => {
             <Dialog open={rfqDialogOpen} onOpenChange={setRfqDialogOpen}>
               <DialogTrigger asChild>
                 <Button size="lg" variant="outline"
-                  className="w-full mb-8 border-accent text-accent hover:bg-accent/5 font-medium"
+                  className="w-full mb-6 border-accent text-accent hover:bg-accent/5 font-medium"
                   data-testid="request-quote-btn">
                   <FileText className="w-5 h-5 mr-2" />
                   {t('products.requestQuote')}
@@ -334,6 +345,31 @@ const ProductDetailPage = () => {
               </DialogContent>
             </Dialog>
 
+            {/* FIX: Un seul bloc fiche produit PDF (doublon supprimé) */}
+            <div className="border border-slate-200 rounded-xl p-4 bg-slate-50 mb-6">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-semibold text-sm text-slate-800 flex items-center gap-1.5">
+                    <FilePdf className="w-4 h-4 text-red-500 flex-shrink-0" />
+                    {t('sheet.title')}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-0.5">{t('sheet.subtitle')}</p>
+                </div>
+                <button
+                  onClick={handleDownloadSheet}
+                  disabled={downloadingSheet}
+                  className="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 bg-primary hover:bg-primary/90 text-white text-xs font-medium rounded-lg transition-colors disabled:opacity-60 whitespace-nowrap"
+                  data-testid="download-sheet"
+                >
+                  {sheetDownloaded ? (
+                    <><CheckCircle className="w-3.5 h-3.5" weight="fill" /> {t('sheet.downloaded')}</>
+                  ) : downloadingSheet ? t('sheet.generating') : (
+                    <><FilePdf className="w-3.5 h-3.5" /> {t('sheet.download')}</>
+                  )}
+                </button>
+              </div>
+            </div>
+
             {/* Benefits */}
             <div className="grid grid-cols-3 gap-4 pt-6 border-t border-slate-200">
               <div className="text-center"><Truck className="w-6 h-6 mx-auto mb-2 text-primary" /><p className="text-xs text-slate-600">Livraison CEMAC</p></div>
@@ -359,12 +395,11 @@ const ProductDetailPage = () => {
             </TabsList>
 
             <TabsContent value="description" className="py-6">
-              {/* tf() pour description bilingue */}
               <p className="text-slate-600 whitespace-pre-wrap">{tf(product, 'description')}</p>
             </TabsContent>
 
             <TabsContent value="specifications" className="py-6">
-              {product.specifications ? (
+              {product.specifications && Object.keys(product.specifications).length > 0 ? (
                 <div className="bg-slate-50 rounded-lg overflow-hidden">
                   <table className="w-full">
                     <tbody>

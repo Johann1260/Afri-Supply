@@ -64,10 +64,26 @@ export default function RFQPage() {
     } catch { console.error('fetchProducts'); }
   };
 
+  // Patterns de détection de contournement (miroir light du backend)
+  const BYPASS_REGEX = /\+?\d[\s\-.]?\d{6,}|@|whatsapp|telegram|appelle|call me|contact.?me|en priv|directly|mon num|my phone|www\.|https?:/i;
+
   const handleCreateRFQ = async (e) => {
     e.preventDefault();
     if (!newRfq.product_id) { toast.error(t('rfq.product')); return; }
     if (!newRfq.delivery_location) { toast.error(t('rfq.location')); return; }
+
+    // Vérification anti-contournement côté client
+    const fieldsToCheck = [newRfq.specifications, newRfq.notes, newRfq.delivery_location].filter(Boolean);
+    for (const field of fieldsToCheck) {
+      if (BYPASS_REGEX.test(field)) {
+        toast.error(
+          '🚫 Votre demande contient des coordonnées personnelles (téléphone, email, WhatsApp…). ' +
+          'Retirez-les — les contacts sont partagés automatiquement après paiement.',
+          { duration: 6000 }
+        );
+        return;
+      }
+    }
 
     try {
       const productRes = await productsAPI.getById(newRfq.product_id);
@@ -267,6 +283,10 @@ export default function RFQPage() {
                 <Label>{t('rfq.notes')}</Label>
                 <Textarea value={newRfq.notes}
                   onChange={(e) => setNewRfq({ ...newRfq, notes: e.target.value })} rows={2} />
+              </div>
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+                🔒 <strong>Protection AfriSupply :</strong> Ne partagez pas vos coordonnées dans ce formulaire.
+                Les contacts sont échangés automatiquement après confirmation du paiement.
               </div>
               <Button type="submit" className="w-full bg-accent hover:bg-accent-hover" size="lg">
                 {t('rfq.submit')}

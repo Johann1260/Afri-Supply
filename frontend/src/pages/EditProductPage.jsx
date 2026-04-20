@@ -14,6 +14,47 @@ import { getImageUrl } from '../lib/utils';
 import { useLocale } from '../context/LocaleContext';
 import { useAuth } from '../context/AuthContext';
 
+
+// ── Composant Spécifications Structurées ─────────────────────────────────────
+const SpecsBuilder = ({ value, onChange, t }) => {
+  const [rows, setRows] = React.useState(() => {
+    try {
+      const parsed = typeof value === 'string' ? JSON.parse(value || '{}') : (value || {});
+      const entries = Object.entries(parsed);
+      return entries.length > 0 ? entries.map(([k, v]) => ({ key: k, val: String(v) })) : [{ key: '', val: '' }];
+    } catch {
+      return [{ key: '', val: '' }];
+    }
+  });
+  const sync = (updated) => {
+    const obj = {};
+    updated.forEach(({ key, val }) => { if (key.trim()) obj[key.trim()] = val; });
+    onChange(JSON.stringify(obj));
+    setRows(updated);
+  };
+  const update = (idx, field, v) => sync(rows.map((r, i) => i === idx ? { ...r, [field]: v } : r));
+  const add = () => sync([...rows, { key: '', val: '' }]);
+  const remove = (idx) => sync(rows.filter((_, i) => i !== idx));
+  const SUGGESTIONS = ['Norme','Matière','Dimensions','Poids','Résistance','Longueur','Largeur','Hauteur','Épaisseur','Diamètre','Pression max','Température max','Débit','Puissance','Tension','Capacité','Traitement surface','Certification'];
+  return (
+    <div className="space-y-2">
+      {rows.map((row, idx) => (
+        <div key={idx} className="flex gap-2 items-center">
+          <input list={`sk-${idx}`} value={row.key} onChange={(e) => update(idx, 'key', e.target.value)}
+            placeholder="Ex: Norme, Dimensions…"
+            className="flex-1 h-9 rounded-md border border-slate-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent/50" />
+          <datalist id={`sk-${idx}`}>{SUGGESTIONS.map((s) => <option key={s} value={s} />)}</datalist>
+          <input value={row.val} onChange={(e) => update(idx, 'val', e.target.value)} placeholder="Valeur"
+            className="flex-1 h-9 rounded-md border border-slate-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent/50" />
+          <button type="button" onClick={() => remove(idx)} className="text-red-400 hover:text-red-600 px-2 text-lg">×</button>
+        </div>
+      ))}
+      <button type="button" onClick={add} className="text-sm text-accent hover:underline">{t('sheet.specs.add')}</button>
+      <p className="text-xs text-slate-400 mt-1">💡 Incluses dans la fiche produit PDF de vos clients.</p>
+    </div>
+  );
+};
+
 export default function EditProductPage() {
   const { t } = useLocale();
   const { id } = useParams();
@@ -215,6 +256,18 @@ export default function EditProductPage() {
               <div>
                 <Label>Description</Label>
                 <Textarea name="description" value={formData.description} onChange={handleChange} rows={5} />
+              </div>
+
+              <div>
+                <Label>Spécifications techniques</Label>
+                <p className="text-xs text-slate-500 mb-2">
+                  Données clés du produit (norme, dimensions, matière…) — incluses dans la fiche PDF client.
+                </p>
+                <SpecsBuilder
+                  value={formData.specifications}
+                  onChange={(v) => setFormData((p) => ({ ...p, specifications: v }))}
+                  t={t}
+                />
               </div>
 
               {/* Images existantes */}
