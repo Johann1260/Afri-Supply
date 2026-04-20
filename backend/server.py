@@ -3709,7 +3709,7 @@ app.include_router(api_router)
 # CORS — restreindre aux origines connues en production
 ALLOWED_ORIGINS = os.environ.get(
     "ALLOWED_ORIGINS",
-    "http://localhost:3000,https://afrisupply.com,https://www.afrisupply.com"
+    "http://localhost:3000,https://afrisupply.com,https://afri-supply.vercel.app"
 ).split(",")
 
 app.add_middleware(
