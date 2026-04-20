@@ -3480,7 +3480,7 @@ async def health():
 @api_router.post("/seed")
 async def seed_data():
     """Seed initial categories and sample data — disabled in production"""
-    if os.environ.get("ENVIRONMENT", "development").lower() != "development":
+    if os.environ.get("ENVIRONMENT", "development").lower() != "production":
         raise HTTPException(status_code=403, detail="Seed disabled in production")
     
     # Check if already seeded — on vérifie les PRODUITS au lieu des catégories
