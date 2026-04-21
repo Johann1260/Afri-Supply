@@ -8,10 +8,10 @@ import { motion } from 'framer-motion';
 
 const ICON_MAP = { Wrench, HardHat, Gear, Buildings };
 const SECTOR_IMAGES = [
-  'https://images.pexels.com/photos/6509862/pexels-photo-6509862.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940',
-  'https://images.pexels.com/photos/3862384/pexels-photo-3862384.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940',
-  'https://images.unsplash.com/photo-1576666735112-87a8ea71671c?crop=entropy&cs=srgb&fm=jpg&q=85',
-  'https://images.pexels.com/photos/236698/pexels-photo-236698.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940',
+ '/cons-bg.webp',
+  '/bt-bg.webp',
+  '/maintenance-bg.webp',
+  '/hero-bg.webp',
 ];
 
 export default function CategoriesPage() {

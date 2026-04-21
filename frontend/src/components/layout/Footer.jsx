@@ -45,7 +45,7 @@ export const Footer = () => {
           {/* Brand */}
           <div className="lg:col-span-2">
             <Link to="/" className="flex items-center gap-3 mb-6">
-              <img src="/logo.png" alt="AfriSupply" className="h-12 w-auto" />
+              <img src="/logo.webp" width="780" height="200" alt="AfriSupply" className="h-12 w-auto" />
             </Link>
             <p className="text-white/70 mb-6 max-w-sm">
               {t('nav.tagline')}

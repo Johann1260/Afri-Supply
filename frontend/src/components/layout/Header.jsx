@@ -78,7 +78,7 @@ export const Header = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
         <div className="flex items-center gap-4">
           <Link to="/" className="flex items-center gap-2 flex-shrink-0" data-testid="logo-link">
-            <img src="/logo.png" alt="AfriSupply" className="h-10 w-auto" />
+            <img src="/logo.webp" width="780" height="200" alt="AfriSupply" className="h-10 w-auto" />
           </Link>
 
           {/* Search — autocomplete */}

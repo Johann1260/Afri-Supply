@@ -28,7 +28,7 @@ const DEFAULT_META = (locale) => ({
 const SCHEMA = {
   "@context": "https://schema.org", "@type": "Organization",
   "name": "AfriSupply", "url": "https://www.afrisupply.com",
-  "logo": "https://www.afrisupply.com/logo.png",
+  "logo": "https://www.afrisupply.com/logo.webp",
   "areaServed": ["CM","GA","CG","TD","GQ","CF"],
   "contactPoint": { "@type": "ContactPoint", "telephone": "+237-690-000-000", "contactType": "customer service" }
 };

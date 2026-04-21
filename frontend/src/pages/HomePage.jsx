@@ -108,7 +108,9 @@ const HomePage = () => {
       <section className="relative bg-primary overflow-hidden">
         <div className="absolute inset-0 opacity-10">
           <img
-            src="https://images.pexels.com/photos/236698/pexels-photo-236698.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+            src="/hero-bg.webp"
+            width="1880" 
+            height="1253"
             alt=""
             className="w-full h-full object-cover"
           />
@@ -215,7 +217,7 @@ const HomePage = () => {
                   data-testid={`category-card-${category.id}`}
                 >
                   <img
-                    src={category.image_url || 'https://images.pexels.com/photos/236698/pexels-photo-236698.jpeg'}
+                    src={category.image_url || '/hero-bg.webp'}
                     alt={category.name}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   />

@@ -63,7 +63,7 @@ export function unregister() {
 // ─────────────────────────────────────────────────────────────────────────────
 // public/service-worker.js (minimal caching strategy)
 const CACHE_NAME = 'afrisupply-v1';
-const STATIC_ASSETS = ['/', '/index.html', '/logo.png', '/manifest.json'];
+const STATIC_ASSETS = ['/', '/index.html', '/logo.webp', '/manifest.json'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
