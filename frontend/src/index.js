@@ -1,0 +1,14 @@
+import React from "react";
+import ReactDOM from "react-dom/client";
+import "@/index.css";
+import App from "@/App";
+import { register } from './serviceWorkerRegistration';
+
+// Register the service worker for offline support and faster load times
+register();
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);

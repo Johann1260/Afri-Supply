@@ -1,0 +1,140 @@
+{
+  "theme": "light",
+  "typography": {
+    "headings": {
+      "family": "Chivo, sans-serif",
+      "weights": ["400", "700", "900"],
+      "usage": "Use for all primary page titles, marketing section headers, and metric callouts. Must apply tracking-tight or tracking-tighter for sizes over text-2xl."
+    },
+    "body": {
+      "family": "Manrope, sans-serif",
+      "weights": ["400", "500", "600"],
+      "usage": "Clean, engineered sans-serif for readable data tables, product descriptions, and dashboard content."
+    },
+    "mono": {
+      "family": "IBM Plex Mono, monospace",
+      "usage": "Use strictly for order IDs, SKUs, timestamps, and technical specifications."
+    },
+    "overlines": {
+      "style": "uppercase, tracking-[0.2em], text-[10px] to text-xs, font-bold",
+      "usage": "Category labels, table headers, and status tags."
+    }
+  },
+  "colors": {
+    "primary": {
+      "DEFAULT": "#034168",
+      "light": "#055B8F",
+      "dark": "#022B45",
+      "description": "Deep Industrial Blue. Use for main navigation, structural sidebars, and high-trust marketing sections."
+    },
+    "accent": {
+      "DEFAULT": "#FF6A00",
+      "hover": "#E65F00",
+      "light": "#FF8833",
+      "description": "Alibaba/Action Orange. Use strictly for primary CTA buttons, important links, and 'Add to Cart' actions. Limit usage to maintain visual impact."
+    },
+    "neutrals": {
+      "background": "#F8FAFC",
+      "surface": "#FFFFFF",
+      "border": "#E2E8F0",
+      "text": "#0F172A",
+      "text_muted": "#64748B",
+      "description": "Slate-tinted grays to keep the UI feeling cool, professional, and metallic rather than a warm, soft consumer app."
+    },
+    "status": {
+      "success": "#10B981",
+      "warning": "#F59E0B",
+      "error": "#EF4444",
+      "info": "#3B82F6"
+    }
+  },
+  "visual_enhancers": {
+    "borders": "Use 'Grid Borders' look. Rely on 1px solid borders (border-slate-200) instead of floating shadows to segment content. This gives a highly structured, 'engineered' B2B feel.",
+    "shadows": "Minimalist. Use shadow-sm for interactive cards, but prioritize border definition over heavy shadows.",
+    "radius": "Subtle roundness. Use rounded-md (6px) or rounded-lg (8px). Avoid pill-shaped elements unless it's a specific badge or status indicator, to maintain an industrial aesthetic.",
+    "glassmorphism": "Only use for sticky headers (bg-white/80 backdrop-blur-xl border-b border-slate-200). Do not use dark or muddy transparent backgrounds.",
+    "icons": "Use Phosphor Icons (@phosphor-icons/react) with a consistent 'regular' or 'bold' weight. They look highly professional for data-dense B2B tools."
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-accent text-white hover:bg-accent-hover transition-colors font-semibold rounded-md",
+      "secondary": "border-2 border-primary text-primary hover:bg-slate-50 transition-colors font-semibold rounded-md",
+      "ghost": "text-slate-600 hover:text-primary hover:bg-slate-100 transition-colors rounded-md"
+    },
+    "cards": {
+      "product": "bg-white border border-slate-200 hover:border-accent/50 transition-all duration-300 rounded-lg overflow-hidden group",
+      "dashboard_widget": "bg-white border border-slate-200 rounded-lg p-6 shadow-sm"
+    },
+    "inputs": {
+      "style": "bg-white border border-slate-300 focus:border-primary focus:ring-1 focus:ring-primary rounded-md transition-all shadow-sm",
+      "labels": "text-sm font-semibold text-slate-700 mb-1 block"
+    },
+    "tags": "px-2 py-1 bg-slate-100 text-slate-700 text-xs font-bold uppercase tracking-wider rounded border border-slate-200"
+  },
+  "grids_and_layouts": {
+    "spacing": "Generous Spacing Philosophy. Use p-8 to p-12 for section containers. Inside cards, use p-6 to prevent text collision with borders.",
+    "dashboard_grid": "High Density Grid. grid-cols-1 md:grid-cols-4 lg:grid-cols-12 gap-6. Dashboard metric cards span 3 cols, main charts span 8 cols, side feeds span 4 cols.",
+    "product_catalog": "Standard B2B grid: grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6.",
+    "marketing_hero": "Asymmetric Bento structure. Do not center everything. Left-align main value prop, place an overlapping image grid on the right."
+  },
+  "motion": {
+    "buttons": "active:scale-[0.98] transition-transform duration-100",
+    "cards": "Hover states must lift slightly (-translate-y-1) and cast a shadow-md.",
+    "page_transitions": "Fade and slide up slightly (opacity-0 translate-y-4 to opacity-100 translate-y-0) using Framer Motion."
+  },
+  "accessibility": {
+    "contrast": "Ensure white text on the #FF6A00 accent meets WCAG AA standards. Use text-shadow if placed over busy images.",
+    "focus": "All interactive elements must have a visible focus state: focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary.",
+    "testing": "All interactive elements (buttons, inputs, links) MUST include a descriptive data-testid attribute in kebab-case (e.g., data-testid='login-submit-button')."
+  },
+  "media": {
+    "images": [
+      {
+        "category": "Hero / Industrial Setting",
+        "url": "https://images.pexels.com/photos/236698/pexels-photo-236698.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Expansive interior of an industrial warehouse showing steel beams"
+      },
+      {
+        "category": "Category - Construction Métallique",
+        "url": "https://images.pexels.com/photos/6509862/pexels-photo-6509862.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "A welder in protective gear works at a construction site outdoors"
+      },
+      {
+        "category": "Category - Construction BTP",
+        "url": "https://images.pexels.com/photos/3862384/pexels-photo-3862384.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Two engineers reviewing construction blueprints on a table"
+      },
+      {
+        "category": "Category - Maintenance Industrielle",
+        "url": "https://images.unsplash.com/photo-1576666735112-87a8ea71671c?crop=entropy&cs=srgb&fm=jpg&q=85",
+        "description": "Man standing in front of mechanical machine"
+      }
+    ]
+  },
+  "3d_libraries": {
+    "recommendation": "Use `react-globe.gl` strictly for the homepage to visualize the CEMAC region connection (Cameroon, Gabon, Congo, etc.) to convey an established network. Do NOT use 3D libraries in the Dashboard or Shopping Cart to preserve performance."
+  },
+  "instructions_to_main_agent": [
+    "You are building AfriSupply, an industrial B2B marketplace. Avoid looking like a soft consumer app. The aesthetic is tactical, heavy, structured, and precise.",
+    "Use Phosphor Icons via `@phosphor-icons/react`.",
+    "Implement Shadcn UI for complex components (Dialogs, Selects, Tables), but customize their look to use 1px slate-200 borders and minimal border-radius (md instead of full).",
+    "Never use `Inter` for headings. Ensure `Chivo` is loaded for headings and `Manrope` for body.",
+    "Include a `data-testid` on every clickable or interactive component.",
+    "Never use transparent backgrounds behind text unless heavily blurred with `backdrop-blur-xl` and `bg-white/80`.",
+    "For product search and catalogs, prioritize data density. B2B buyers want to see specifications (SKUs, Dimensions), not just pretty pictures.",
+    "Dashboard views must maximize screen real estate. Use tight margins between widgets, but keep generous padding inside the widgets to prevent clutter."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Do not converge toward generic 'AI slop' aesthetics. Make creative, distinctive frontends.",
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients.",
+    "Don't make generic centered layouts. Asymmetry creates tension, tension creates interest.",
+    "Create depth through layered design elements with z-index hierarchy and crisp 1px structural borders.",
+    "You MUST NOT apply universal transition (e.g., transition: all). Add specific transitions (e.g., transition-colors, transition-transform).",
+    "You MUST NOT center align the app container. Do not add `.App { text-align: center; }`.",
+    "Always use modern button styles suitable for industrial tech (sharp or slightly rounded, NEVER pill-shaped for this specific project).",
+    "NEVER use Emoji characters for icons.",
+    "Every interaction needs micro-animations (hover lifts, active scale-downs).",
+    "Use 2-3x more spacing than feels comfortable for macro sections, but maintain strict high-density for tabular data.",
+    "Components MUST use named exports, Pages MUST use default exports."
+  ]
+}

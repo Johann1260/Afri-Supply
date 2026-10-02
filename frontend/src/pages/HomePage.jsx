@@ -1,0 +1,333 @@
+import React, { useState, useEffect, lazy, Suspense } from 'react';
+import { Link } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import {
+  ArrowRight,
+  Buildings,
+  Wrench,
+  HardHat,
+  Gear,
+  TrendUp,
+  Users,
+  ShieldCheck,
+  Truck,
+  Sparkle
+} from '@phosphor-icons/react';
+
+// import { Layout } from '../components/layout';
+import { Button } from '../components/ui/button';
+import { categoriesAPI, productsAPI, seedAPI } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
+import { useLocale } from '../context/LocaleContext';
+
+// Lazy loading pour ProductGrid
+const ProductGrid = lazy(() => import('../components/products/ProductGrid'));
+// Lazy loading du Layout (le plus gros gain potentiel)
+const Layout = lazy(() => import('../components/layout/Layout'));
+
+const HomePage = () => {
+  const { isAuthenticated } = useAuth();
+  const { t } = useLocale();
+
+  const [categories, setCategories] = useState([]);
+  const [popularProducts, setPopularProducts] = useState([]);
+  const [recommendedProducts, setRecommendedProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [recoLoading, setRecoLoading] = useState(false);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        // Auto-seed dev: une seule fois par session navigateur (évite les rappels en boucle
+        // dus à HMR Vite + StrictMode + navigations entre pages).
+        if (import.meta.env.DEV && !sessionStorage.getItem('afri_seed_done')) {
+          try {
+            await seedAPI.seed();
+            sessionStorage.setItem('afri_seed_done', '1');
+          } catch (e) { /* ignore */ }
+        }
+
+        const [catRes, prodRes] = await Promise.all([
+          categoriesAPI.getAll(),
+          productsAPI.getPopular(8),
+        ]);
+
+        setCategories(catRes?.data || []);
+        setPopularProducts(prodRes?.data || []);
+      } catch (error) {
+        console.error('Failed to fetch data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+
+  // Recommandations IA si l'utilisateur est connecté
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const fetchRecommendations = async () => {
+      setRecoLoading(true);
+      try {
+        const res = await productsAPI.getRecommendations();
+        setRecommendedProducts(res?.data || []);
+      } catch (err) {
+        console.error('Recommendations error:', err);
+      } finally {
+        setRecoLoading(false);
+      }
+    };
+    fetchRecommendations();
+  }, [isAuthenticated]);
+
+  const getCategoryIcon = (iconName) => {
+    const icons = { Wrench, HardHat, Gear };
+    const Icon = icons[iconName] || Buildings;
+    return <Icon className="w-8 h-8" weight="duotone" />;
+  };
+
+  const stats = [
+    { label: t('home.stats.suppliers'), value: '500+', icon: Users },
+    { label: t('home.stats.products'), value: '10K+', icon: Buildings },
+    { label: t('home.stats.transactions'), value: '25K+', icon: TrendUp },
+    { label: t('home.stats.countries'), value: '6', icon: Truck },
+  ];
+
+  const benefits = [
+    {
+      icon: ShieldCheck,
+      title: t('home.benefits.title'),
+      description: t('home.benefits.verified.desc'),
+    },
+    {
+      icon: Truck,
+      title: t('home.benefits.delivery')  ,
+      description: t('home.benefits.delivery.desc'),
+    },
+    {
+      icon: Users,
+      title: t('home.benefits.support'),
+      description: t('home.benefits.support.desc'),
+    },
+  ];
+
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-8 h-8 border-4 border-accent border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-slate-500">Chargement...</p>
+        </div>
+      </div>
+    }>
+      <Layout>
+      {/* Hero */}
+      <section className="relative bg-primary overflow-hidden">
+        <div className="absolute inset-0 opacity-10">
+          <img
+            src="/hero-bg.webp"
+            alt=""
+            className="w-full h-full object-cover"
+            fetchPriority='high'
+          />
+        </div>
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 lg:py-32">
+          <div className="grid lg:grid-cols-2 gap-12 items-center">
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
+              <span className="inline-block px-4 py-1 bg-accent/20 text-accent rounded-full text-sm font-bold mb-6">
+                Zone CEMAC
+              </span>
+              <h1 className="font-heading font-black text-4xl sm:text-5xl lg:text-6xl text-white leading-tight mb-6">
+                {t('home.hero.title')}
+                <span className="text-accent"> {t('home.hero.titleHighlight')}</span>
+              </h1>
+              <p className="text-lg text-white/80 mb-8 max-w-xl">
+                  {t('home.hero.subtitle')}
+              </p>
+              <div className="flex flex-col sm:flex-row gap-4">
+                <Link to="/products">
+                  <Button size="lg" className="bg-accent hover:bg-accent-hover w-full sm:w-auto" data-testid="hero-cta-products">
+                    {t('home.hero.cta.products')}
+                    <ArrowRight className="w-5 h-5 ml-2" />
+                  </Button>
+                </Link>
+                <Link to="/register">
+                  <Button size="lg" variant="outline" className="border-white text-white hover:bg-white/10 w-full sm:w-auto" data-testid="hero-cta-register">
+                    {t('home.hero.cta.supplier')}
+                  </Button>
+                </Link>
+              </div>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.5, delay: 0.2 }}
+              className="grid grid-cols-2 gap-4"
+            >
+              {stats.map((stat, i) => (
+                <div key={i} className="bg-white/10 backdrop-blur-sm border border-white/20 rounded-lg p-6">
+                  <stat.icon className="w-8 h-8 text-accent mb-3" weight="duotone" />
+                  <p className="font-heading font-bold text-3xl text-white">{stat.value}</p>
+                  <p className="text-sm text-white/70">{stat.label}</p>
+                </div>
+              ))}
+            </motion.div>
+          </div>
+        </div>
+      </section>
+      
+      {/* Categories */}
+      <section className="py-16 lg:py-24 bg-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-end mb-10">
+            <div>
+              <p className="overline text-accent mb-2">{t('home.categories.title')}</p>
+              <h2 className="section-heading">{t('home.categories.title')}</h2>
+            </div>
+            <Link to="/categories" className="hidden sm:flex items-center gap-2 text-primary font-medium hover:text-accent transition-colors">
+              {t('home.reco.seeAll')}
+              <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
+          <div className="grid md:grid-cols-3 gap-6">
+            {(categories || []).map((category, i) => (
+              <motion.div
+                key={category.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, delay: i * 0.1 }}
+              >
+                <Link
+                  to={`/products?category_id=${category.id}`}
+                  className="group block relative h-64 rounded-lg overflow-hidden"
+                  data-testid={`category-card-${category.id}`}
+                >
+                  <img
+                    src={category.image_url || '/hero-bg.webp'}
+                    alt={category.name}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-primary/90 via-primary/40 to-transparent" />
+                  <div className="absolute bottom-0 left-0 right-0 p-6">
+                    <div className="flex items-center gap-3 mb-2 text-accent">
+                      {getCategoryIcon(category.icon)}
+                    </div>
+                    <h3 className="font-heading font-bold text-xl text-white mb-1">{category.name}</h3>
+                    <p className="text-sm text-white/70 line-clamp-2">{category.description}</p>
+                  </div>
+                </Link>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Recommandations IA */}
+      {isAuthenticated && (recoLoading || recommendedProducts.length > 0) && (
+        <section className="py-16 bg-gradient-to-b from-slate-50 to-white">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex justify-between items-end mb-10">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <Sparkle className="w-5 h-5 text-accent" weight="fill" />
+                  <p className="overline text-accent">{t('home.reco.label')}</p>
+                </div>
+                <h2 className="section-heading">{t('home.reco.title')}</h2>
+                <p className="text-slate-500 mt-1 text-sm">
+                  {t('home.reco.subtitle')}
+                </p>
+              </div>
+              <Link
+                to="/products"
+                className="hidden sm:flex items-center gap-2 text-primary font-medium hover:text-accent transition-colors"
+              >
+                {t('home.reco.seeAll')}
+                <ArrowRight className="w-4 h-4" />
+              </Link>
+            </div>
+
+            <Suspense fallback={<div className="h-96 bg-slate-100 animate-pulse rounded-xl" />}>
+              <ProductGrid products={recommendedProducts} loading={recoLoading} />
+            </Suspense>
+          </div>
+        </section>
+      )}
+
+      {/* Popular Products */}
+      <section className="py-16 lg:py-24 bg-slate-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-end mb-10">
+            <div>
+              <p className="overline text-accent mb-2">{t('home.popular.label')}</p>
+              <h2 className="section-heading">{t('home.popular.title')}</h2>
+            </div>
+            <Link to="/products" className="hidden sm:flex items-center gap-2 text-primary font-medium hover:text-accent transition-colors">
+              {t('home.reco.seeAll')} <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
+
+          <Suspense fallback={<div className="h-96 bg-slate-100 animate-pulse rounded-xl" />}>
+            <ProductGrid products={popularProducts || []} loading={loading} />
+          </Suspense>
+        </div>
+      </section>
+
+      {/* Benefits */}
+      <section className="py-16 lg:py-24 bg-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-12">
+            <p className="overline text-accent mb-2">{t('home.benefits.label')}</p>
+            <h2 className="section-heading">{t('home.benefits.title')}</h2>
+          </div>
+          <div className="grid md:grid-cols-3 gap-8">
+            {benefits.map((benefit, i) => (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.3, delay: i * 0.1 }}
+                className="bg-slate-50 border border-slate-200 rounded-lg p-8 text-center"
+              >
+                <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-6">
+                  <benefit.icon className="w-8 h-8 text-primary" weight="duotone" />
+                </div>
+                <h3 className="font-heading font-bold text-xl text-slate-900 mb-3">{benefit.title}</h3>
+                <p className="text-slate-600">{benefit.description}</p>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* CTA */}
+      <section className="py-16 lg:py-24 bg-primary">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+          <h2 className="font-heading font-bold text-3xl lg:text-4xl text-white mb-6">
+            {t('home.cta.title')}
+          </h2>
+          <p className="text-lg text-white/80 mb-8">
+            {t('home.cta.subtitle')}
+          </p>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <Link to="/register?type=supplier">
+              <Button size="lg" className="bg-accent hover:bg-accent-hover w-full sm:w-auto" data-testid="cta-become-supplier">
+                {t('home.cta.supplier')}
+              </Button>
+            </Link>
+            <Link to="/register?type=buyer">
+              <Button size="lg" variant="outline" className="border-white text-white hover:bg-white/10 w-full sm:w-auto" data-testid="cta-become-buyer">
+                {t('home.cta.buyer')}
+              </Button>
+            </Link>
+          </div>
+        </div>
+      </section>
+    </Layout>
+    </Suspense>
+  );
+};
+
+export default HomePage;

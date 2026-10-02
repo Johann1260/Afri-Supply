@@ -1,0 +1,60 @@
+# ====================== CORE ======================
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+gunicorn==22.0.0
+starlette==0.37.2
+
+# ====================== DATABASE ======================
+motor==3.5.1
+pymongo==4.5.0
+redis[asyncio]==5.0.8
+
+# ====================== AUTH & SECURITY ======================
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+PyJWT==2.11.0
+bcrypt==4.1.3
+cryptography==46.0.5
+
+# ====================== VALIDATION ======================
+pydantic
+pydantic-settings
+email-validator==2.3.0
+
+# ====================== PAYMENTS ======================
+stripe==10.12.0
+
+# ====================== EMAIL & NOTIFICATIONS ======================
+resend==2.4.0
+twilio==9.3.0
+aiosmtplib>=5.1.0
+
+# ====================== PDF ======================
+reportlab==4.2.5
+
+# ====================== UTILITIES ======================
+python-multipart==0.0.12
+python-dotenv==1.2.1
+slowapi==0.1.9
+httpx==0.27.2
+requests==2.32.5
+Pillow==12.1.1
+Jinja2==3.1.6
+
+# ====================== DEVELOPMENT ======================
+black==26.1.0
+isort==8.0.0
+flake8==7.3.0
+pytest==9.0.2
+mypy==1.19.1
+
+# ====================== OTHERS ======================
+aiohttp==3.13.3
+websockets==16.0
+python-dateutil==2.9.0.post0
+pytz==2025.1
+PyYAML==6.0.3
+
+# ====================== MONITORING ======================
+sentry-sdk[fastapi,pymongo]==2.19.2
+apscheduler==3.10.4

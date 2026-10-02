@@ -1,0 +1,43 @@
+{
+  "name": "AfriSupply — Marketplace B2B Industrielle",
+  "short_name": "AfriSupply",
+  "description": "Marketplace B2B industrielle pour l'Afrique Centrale — Zone CEMAC",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#034168",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/logo192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "shopping"],
+  "lang": "fr",
+  "dir": "ltr",
+  "shortcuts": [
+    {
+      "name": "Catalogue produits",
+      "short_name": "Produits",
+      "description": "Parcourir le catalogue",
+      "url": "/products",
+      "icons": [{ "src": "/logo192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Mes commandes",
+      "short_name": "Commandes",
+      "description": "Voir mes commandes",
+      "url": "/dashboard",
+      "icons": [{ "src": "/logo192.png", "sizes": "192x192" }]
+    }
+  ]
+}
